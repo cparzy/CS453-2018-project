@@ -26,7 +26,7 @@ LDFLAGS  := -ldl -lpthread
 .PHONY: run build clean
 
 run: $(BIN)
-	@$(BIN) ../reference.so $(patsubst %,../%.so,$(filter-out include grading reference,$(patsubst ../%/,%,$(filter-out $(wildcard ../*),$(wildcard ../*/)))))
+	@$(BIN) ../reference.so $(filter-out ../reference.so,$(wildcard ../*.so))
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile

@@ -23,10 +23,11 @@ CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -fPIC -I$(INCLUDE_DIR)
 LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
 LDFLAGS  := -shared
 
-.PHONY: dummy build clean
+.PHONY: build clean
 
-dummy:
-	@echo Expected a valid target
+build: $(BIN)
+clean:
+	$(RM) $(OBJS) $(BIN)
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile
@@ -42,7 +43,3 @@ $(foreach EXT,$(EXT_CXX),$(eval $(call BUILD_CXX,$(EXT))))
 
 $(BIN): $(OBJS) Makefile
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
-
-build: $(BIN)
-clean:
-	$(RM) $(OBJS) $(BIN)

@@ -1,4 +1,4 @@
-BIN := ../$(notdir $(lastword $(abspath .))).so
+BIN := ./$(notdir $(lastword $(abspath .)))
 
 EXT_H    := h
 EXT_HPP  := h hh hpp hxx h++
@@ -17,16 +17,25 @@ SRCS_CXX := $(call WILD_EXT,EXT_CXX,$(SOURCE_DIR))
 OBJS     := $(SRCS_C:%=%.o) $(SRCS_CXX:%=%.o)
 
 CC       := $(CC)
-CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -fPIC -I$(INCLUDE_DIR)
+CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -I$(INCLUDE_DIR)
 CXX      := $(CXX)
-CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -fPIC -I$(INCLUDE_DIR)
+CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -I$(INCLUDE_DIR)
 LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
-LDFLAGS  := -shared
+LDFLAGS  := -ldl -lpthread
 
-.PHONY: dummy build clean
+LIBS := $(filter-out ../include/ ../grading/ ../template/,$(filter-out $(wildcard ../*),$(wildcard ../*/)))
 
-dummy:
-	@echo Expected a valid target
+.PHONY: build build-libs clean clean-libs run
+
+build: $(BIN)
+build-libs:
+	@$(foreach DIR,$(LIBS),make -C $(DIR) build; )
+clean:
+	$(RM) $(OBJS) $(BIN)
+clean-libs:
+	@$(foreach DIR,$(LIBS),make -C $(DIR) clean; )
+run: $(BIN)
+	@$(BIN) ../reference.so $(filter-out ../reference.so,$(wildcard ../*.so))
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile
@@ -42,7 +51,3 @@ $(foreach EXT,$(EXT_CXX),$(eval $(call BUILD_CXX,$(EXT))))
 
 $(BIN): $(OBJS) Makefile
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
-
-build: $(BIN)
-clean:
-	$(RM) $(OBJS) $(BIN)

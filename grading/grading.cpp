@@ -651,7 +651,7 @@ int main(int argc, char** argv) {
         auto const nbtxperwrk   = 10000000ul;
         auto const nbaccounts   = 4 * nbworkers;
         auto const init_balance = 100;
-        auto const prob_long    = 0.05f;
+        auto const prob_long    = 0.5f;
         auto const nbrepeats    = 3;
         ::std::cout << "⎧ Number of worker threads: " << nbworkers << ::std::endl;
         ::std::cout << "⎪ Number of TX per worker:  " << nbtxperwrk << ::std::endl;

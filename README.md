@@ -4,6 +4,7 @@ Your goal is to implement a Software Transactional Memory (STM).
 
 The *real* goal is of course to get you a hands-on experience with actual concurrent programming.
 
+
 ## What prior knowledge do I need?
 
 Only basic C or C++ knowledge.
@@ -35,6 +36,8 @@ How to use the atomic libraries and the memory models of C11 and C++11 will be t
 
 * [stmmap](https://github.com/skaphan/stmmap)
 
+You may read and inspire from existing STM libraries, but it must be **your own code** that carries out transactions.
+
 
 ## Grading
 
@@ -57,9 +60,9 @@ How to use the atomic libraries and the memory models of C11 and C++11 will be t
 
 2. Make a local copy of the `template` directory with your SCIPER number (e.g. `$cp template 123456`).
 
-3. Complete your copy of the template with **your own code**.
+3. Complete (or completely rewrite) your copy of the template with **your own code**.
 
-   1. Complete/modify your code.
+   1. Complete/rewrite your code; only the interface should be kept identical.
 
    2. Compile and test locally with: `path/to/directory/grading$ make build-libs run`.
 
@@ -69,20 +72,28 @@ How to use the atomic libraries and the memory models of C11 and C++11 will be t
 
 ### List of functions to implement
 
-* `shared_t tm_create(size_t, size_t);`
+First iteration:
 
-* `void tm_destroy(shared_t);`
+* `shared_t tm_create(size_t, size_t)`
 
-* `void* tm_start(shared_t);`
+* `void tm_destroy(shared_t)`
 
-* `size_t tm_size(shared_t);`
+* `void* tm_start(shared_t)`
 
-* `size_t tm_align(shared_t);`
+* `size_t tm_size(shared_t)`
 
-* `tx_t tm_begin(shared_t);`
+* `size_t tm_align(shared_t)`
 
-* `bool tm_end(shared_t, tx_t);`
+* `tx_t tm_begin(shared_t)`
 
-* `bool tm_read(shared_t, tx_t, void const*, size_t, void*);`
+* `bool tm_end(shared_t, tx_t)`
 
-* `bool tm_write(shared_t, tx_t, void const*, size_t, void*);`
+* `bool tm_read(shared_t, tx_t, void const*, size_t, void*)`
+
+* `bool tm_write(shared_t, tx_t, void const*, size_t, void*)`
+
+Second iteration (which adds memory (de)allocation):
+
+* `bool tm_alloc(shared_t, tx_t, size_t, void**)`
+
+* `bool tm_free(shared_t, tx_t, void*)`

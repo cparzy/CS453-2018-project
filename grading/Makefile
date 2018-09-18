@@ -8,7 +8,7 @@ EXT_CXX  := C cc cpp cxx c++
 INCLUDE_DIR := ../include
 SOURCE_DIR  := .
 
-WILD_EXT  = $(foreach EXT,$($(1)),$(wildcard $(2)/*.$(EXT)))
+WILD_EXT  = $(strip $(foreach EXT,$($(1)),$(wildcard $(2)/*.$(EXT))))
 
 HDRS_C   := $(call WILD_EXT,EXT_H,$(INCLUDE_DIR))
 HDRS_CXX := $(call WILD_EXT,EXT_HPP,$(INCLUDE_DIR))
@@ -21,7 +21,8 @@ CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -I$(INCLUDE_DIR)
 CXX      := $(CXX)
 CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -I$(INCLUDE_DIR)
 LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
-LDFLAGS  := -ldl -lpthread
+LDFLAGS  :=
+LDLIBS   := -ldl -lpthread
 
 LIBS := $(filter-out ../include/ ../grading/ ../template/,$(filter-out $(wildcard ../*),$(wildcard ../*/)))
 
@@ -50,4 +51,4 @@ endef
 $(foreach EXT,$(EXT_CXX),$(eval $(call BUILD_CXX,$(EXT))))
 
 $(BIN): $(OBJS) Makefile
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)

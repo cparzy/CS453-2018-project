@@ -299,7 +299,7 @@ private:
      * @param func "Clock" function to call
      * @return Resulting time
     **/
-    static Tick convert(int (*func)(::clockid_t, struct ::timespec*) noexcept) noexcept {
+    static Tick convert(int (*func)(::clockid_t, struct ::timespec*)) noexcept {
         struct ::timespec buf;
         if (unlikely(func(CLOCK_MONOTONIC, &buf) < 0))
             return invalid_tick;

@@ -24,19 +24,20 @@ LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
 LDFLAGS  :=
 LDLIBS   := -ldl -lpthread
 
-LIBS := $(filter-out ../include/ ../grading/ ../template/,$(filter-out $(wildcard ../*),$(wildcard ../*/)))
+LIB_DIRS := $(filter-out ../include/ ../grading/ ../template/,$(filter-out $(wildcard ../*),$(wildcard ../*/)))
+LIB_SOS  := $(patsubst %/,%.so,$(filter-out ../reference/,$(LIB_DIRS)))
 
 .PHONY: build build-libs clean clean-libs run
 
 build: $(BIN)
 build-libs:
-	@$(foreach DIR,$(LIBS),make -C $(DIR) build; )
+	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) build; )
 clean:
 	$(RM) $(OBJS) $(BIN)
 clean-libs:
-	@$(foreach DIR,$(LIBS),make -C $(DIR) clean; )
+	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) clean; )
 run: $(BIN)
-	@$(BIN) ../reference.so $(filter-out ../reference.so,$(wildcard ../*.so))
+	$(BIN) ../reference.so $(LIB_SOS)
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile

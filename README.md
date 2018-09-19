@@ -56,7 +56,7 @@ You may read and inspire from existing STM libraries, but it must be **your own 
 
 ## How to write my own STM?
 
-1. Fork this repository.
+1. Clone/download this repository.
 
 2. Make a local copy of the `template` directory with your SCIPER number (e.g. `$cp template 123456`).
 

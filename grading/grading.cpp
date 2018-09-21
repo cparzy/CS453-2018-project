@@ -22,7 +22,7 @@
 **/
 
 // Compile-time configuration
-// #define use_mm_pause
+// #define USE_MM_PAUSE
 
 // External headers
 #include <algorithm>
@@ -36,7 +36,7 @@ extern "C" {
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
-#if (defined(__i386__) || defined(__x86_64__)) && defined(use_mm_pause)
+#if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
     #include <xmmintrin.h>
 #endif
 }
@@ -277,6 +277,10 @@ public:
 
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
+/** Seed type.
+**/
+using Seed = ::std::uint_fast32_t;
+
 /** High-performance time accounting class.
 **/
 class Chrono final {
@@ -391,9 +395,10 @@ public:
     }
 public:
     /** [thread-safe] Worker full run.
+     * @param seed Seed to use
      * @return Whether inconsistencies have been (passively) detected
     **/
-    virtual bool run() = 0;
+    virtual bool run(Seed) = 0;
     /** [thread-safe] Worker full run.
      * @return Whether no inconsistency has been detected
     **/
@@ -417,46 +422,69 @@ public:
      * @param prob_long    Probability of running a long, read-only control transaction
     **/
     Bank(TransactionalLibrary const& library, size_t nbaccounts, size_t nbtxperwrk, int init_balance, float prob_long): Workload{library, sizeof(int) * nbaccounts, alignof(int)}, nbaccounts{nbaccounts}, nbtxperwrk{nbtxperwrk}, init_balance{init_balance}, prob_long{prob_long} {
-        auto tx = tm.begin();
-        for (size_t i = 0; i < nbaccounts; ++i)
-            tm.write(tx, &init_balance, sizeof(int), tm.address(i * sizeof(int)));
-        tm.end(tx);
+        do {
+            auto tx = tm.begin();
+            auto&& init_fn = [&]() {
+                for (size_t i = 0; i < nbaccounts; ++i) {
+                    if (unlikely(!tm.write(tx, &init_balance, sizeof(int), tm.address(i * sizeof(int)))))
+                        return false;
+                }
+                return true;
+            };
+            if (unlikely(!init_fn()))
+                continue;
+            if (unlikely(!tm.end(tx)))
+                continue;
+            break;
+        } while (false);
     }
 private:
     /** Long transaction, summing the balance of each account.
-     * @param tx Current transaction
      * @return Whether no inconsistency has been found
     **/
-    bool long_check_tx(TX tx) {
-        int sum = 0;
-        for (size_t i = 0; i < nbaccounts; ++i) {
-            int local;
-            tm.read(tx, tm.address(i * sizeof(int)), sizeof(int), &local);
-            sum += local;
-        }
-        return sum == init_balance * static_cast<int>(nbaccounts);
+    bool long_check_tx() {
+        do {
+            auto valid = true;
+            auto tx = tm.begin();
+            int sum = 0;
+            auto&& read_fn = [&]() {
+                for (size_t i = 0; i < nbaccounts; ++i) {
+                    int local;
+                    if (unlikely(!tm.read(tx, tm.address(i * sizeof(int)), sizeof(int), &local)))
+                        return false;
+                    if (unlikely(local < 0))
+                        valid = false;
+                    sum += local;
+                }
+                return true;
+            };
+            if (unlikely(!read_fn()))
+                continue;
+            if (unlikely(!tm.end(tx)))
+                continue;
+            return valid && sum == init_balance * static_cast<int>(nbaccounts);
+        } while (true);
     }
 public:
-    virtual bool run() {
-        ::std::random_device device;
-        ::std::minstd_rand   engine{device()};
+    virtual bool run(Seed seed) {
+        ::std::minstd_rand engine{seed};
         ::std::bernoulli_distribution long_dist{prob_long};
         ::std::uniform_int_distribution<size_t> account{0, nbaccounts - 1};
         Chrono chrono;
         chrono.start();
-        for (size_t cntr = 0; cntr < nbtxperwrk; ++cntr) {
-            auto tx = tm.begin();
+        for (size_t cntr = 0; cntr < nbtxperwrk;) {
             if (long_dist(engine)) { // Do a long transaction
-                if (unlikely(!long_check_tx(tx))) {
-                    tm.end(tx);
+                if (unlikely(!long_check_tx()))
                     return false;
-                }
             } else { // Do a short transaction
+                auto tx = tm.begin();
                 auto acc_a = account(engine);
                 auto acc_b = account(engine); // Of course, might be same as 'acc_a'
                 int solde_a, solde_b;
-                tm.read(tx, tm.address(acc_a * sizeof(int)), sizeof(int), &solde_a);
-                tm.read(tx, tm.address(acc_b * sizeof(int)), sizeof(int), &solde_b);
+                if (unlikely(!tm.read(tx, tm.address(acc_a * sizeof(int)), sizeof(int), &solde_a)))
+                    continue;
+                if (unlikely(!tm.read(tx, tm.address(acc_b * sizeof(int)), sizeof(int), &solde_b)))
+                    continue;
                 if (unlikely(solde_a < 0 || solde_b < 0)) { // Inconsistency!
                     tm.end(tx);
                     return false;
@@ -466,21 +494,22 @@ public:
                         --solde_a;
                         ++solde_b;
                     }
-                    tm.write(tx, &solde_a, sizeof(int), tm.address(acc_a * sizeof(int)));
-                    tm.write(tx, &solde_b, sizeof(int), tm.address(acc_b * sizeof(int)));
+                    if (unlikely(!tm.write(tx, &solde_a, sizeof(int), tm.address(acc_a * sizeof(int)))))
+                        continue;
+                    if (unlikely(!tm.write(tx, &solde_b, sizeof(int), tm.address(acc_b * sizeof(int)))))
+                        continue;
                 }
+                if (unlikely(!tm.end(tx)))
+                    continue;
             }
-            tm.end(tx);
+            ++cntr;
         }
         chrono.stop();
         add_tick(chrono);
         return true;
     }
     virtual bool check() {
-        auto tx = tm.begin();
-        auto res = long_check_tx(tx);
-        tm.end(tx);
-        return res;
+        return long_check_tx();
     }
 };
 
@@ -489,7 +518,7 @@ public:
 /** Pause execution.
 **/
 static void pause() {
-#if (defined(__i386__) || defined(__x86_64__)) && defined(use_mm_pause)
+#if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
     _mm_pause();
 #else
     ::std::this_thread::yield();
@@ -592,9 +621,10 @@ public:
  * @param workload  Workload instance to use
  * @param nbthreads Number of concurrent threads to use
  * @param nbrepeats Number of repetitions (keep the median)
+ * @param seed      Seed to use
  * @return Whether no inconsistency have been *passively* detected, median execution time (in ns) (undefined if inconsistency)
 **/
-static auto measure(Workload& workload, unsigned int const nbthreads, unsigned int const nbrepeats) {
+static auto measure(Workload& workload, unsigned int const nbthreads, unsigned int const nbrepeats, Seed seed) {
     ::std::thread threads[nbthreads];
     Sync sync{nbthreads}; // "As-synchronized-as-possible" starts so that threads interfere "as-much-as-possible"
     for (unsigned int i = 0; i < nbthreads; ++i) { // Start threads
@@ -603,7 +633,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
                 while (true) {
                     if (!sync.worker_wait())
                         return;
-                    sync.worker_notify(workload.run());
+                    sync.worker_notify(workload.run(seed));
                 }
             } catch (::std::exception const& err) {
                 sync.worker_notify(false); // Exception in workload, since sync.* cannot throw
@@ -638,8 +668,8 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
 **/
 int main(int argc, char** argv) {
     try {
-        if (argc < 2) {
-            ::std::cout << "Usage: " << (argc > 0 ? argv[0] : "grading") << " <reference library path> <tested library path>..." << ::std::endl;
+        if (argc < 3) {
+            ::std::cout << "Usage: " << (argc > 0 ? argv[0] : "grading") << " <seed> <reference library path> <tested library path>..." << ::std::endl;
             return 1;
         }
         auto const nbworkers = []() {
@@ -653,18 +683,20 @@ int main(int argc, char** argv) {
         auto const init_balance = 100;
         auto const prob_long    = 0.5f;
         auto const nbrepeats    = 3;
+        auto const seed         = static_cast<Seed>(::std::stoul(argv[1]));
         ::std::cout << "⎧ Number of worker threads: " << nbworkers << ::std::endl;
         ::std::cout << "⎪ Number of TX per worker:  " << nbtxperwrk << ::std::endl;
         ::std::cout << "⎪ Total number of accounts: " << nbaccounts << ::std::endl;
         ::std::cout << "⎪ Initial account balance:  " << init_balance << ::std::endl;
         ::std::cout << "⎪ Long TX probability:      " << prob_long << ::std::endl;
-        ::std::cout << "⎩ Number of repetitions:    " << nbrepeats << ::std::endl;
+        ::std::cout << "⎪ Number of repetitions:    " << nbrepeats << ::std::endl;
+        ::std::cout << "⎩ Seed value:               " << seed << ::std::endl;
         auto&& eval = [&](char const* path, Chrono::Tick reference) { // Library evaluation
             try {
                 ::std::cout << "⎧ Evaluating '" << path << "'" << (reference == Chrono::invalid_tick ? " (reference)" : "") << "..." << ::std::endl;
                 TransactionalLibrary tl{path};
                 Bank bank{tl, nbaccounts, nbtxperwrk, init_balance, prob_long};
-                auto res     = measure(bank, nbworkers, nbrepeats);
+                auto res     = measure(bank, nbworkers, nbrepeats, seed);
                 auto correct = ::std::get<0>(res) && bank.check();
                 auto perf    = ::std::get<1>(res);
                 if (unlikely(!correct)) {
@@ -683,11 +715,11 @@ int main(int argc, char** argv) {
             }
         };
         { // Evaluations
-            auto reference = eval(argv[1], Chrono::invalid_tick);
+            auto reference = eval(argv[2], Chrono::invalid_tick);
             if (unlikely(!::std::get<0>(reference)))
                 return 1;
             auto perf_ref = ::std::get<1>(reference);
-            for (auto i = 2; i < argc; ++i)
+            for (auto i = 3; i < argc; ++i)
                 eval(argv[i], perf_ref);
         }
         return 0;

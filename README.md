@@ -58,7 +58,7 @@ You may read and inspire from existing STM libraries, but it must be **your own 
 
 1. Clone/download this repository.
 
-2. Make a local copy of the `template` directory with your SCIPER number (e.g. `$cp template 123456`).
+2. Make a local copy of the `template` directory with your SCIPER number (e.g. `$cp -r template 123456`).
 
 3. Complete (or completely rewrite) your copy of the template with **your own code**.
 

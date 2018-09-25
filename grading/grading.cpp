@@ -396,7 +396,7 @@ public:
 public:
     /** [thread-safe] Worker full run.
      * @param seed Seed to use
-     * @return Whether inconsistencies have been (passively) detected
+     * @return Whether no inconsistency has been (passively) detected
     **/
     virtual bool run(Seed) = 0;
     /** [thread-safe] Worker full run.

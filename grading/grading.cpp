@@ -346,10 +346,6 @@ public:
 **/
 class Workload {
 protected:
-    /** Transaction type.
-    **/
-    using TX = TransactionalMemory::TX;
-protected:
     TransactionalLibrary const& tl;  // Associated transactional library
     TransactionalMemory         tm;  // Built transactional memory to use
     ::std::atomic<Chrono::Tick> sum; // Sum of the tick over all the runs

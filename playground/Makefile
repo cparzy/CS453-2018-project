@@ -1,11 +1,11 @@
-BIN := ./$(notdir $(lastword $(abspath .)))
+BIN := $(notdir $(lastword $(abspath .)))
 
 EXT_H    := h
 EXT_HPP  := h hh hpp hxx h++
 EXT_C    := c
 EXT_CXX  := C cc cpp cxx c++
 
-INCLUDE_DIR := ../include
+INCLUDE_DIR := .
 SOURCE_DIR  := .
 
 WILD_EXT  = $(strip $(foreach EXT,$($(1)),$(wildcard $(2)/*.$(EXT))))
@@ -17,27 +17,20 @@ SRCS_CXX := $(call WILD_EXT,EXT_CXX,$(SOURCE_DIR))
 OBJS     := $(SRCS_C:%=%.o) $(SRCS_CXX:%=%.o)
 
 CC       := $(CC)
-CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -I$(INCLUDE_DIR)
+CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -fPIC -I$(INCLUDE_DIR)
 CXX      := $(CXX)
-CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -I$(INCLUDE_DIR)
+CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -fPIC -I$(INCLUDE_DIR)
 LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
 LDFLAGS  :=
-LDLIBS   := -ldl -lpthread
+LDLIBS   := -lpthread
 
-LIB_DIRS := $(filter-out ../include/ ../grading/ ../playground/ ../template/,$(filter-out $(wildcard ../*),$(wildcard ../*/)))
-LIB_SOS  := $(patsubst %/,%.so,$(filter-out ../reference/,$(LIB_DIRS)))
-
-.PHONY: build build-libs clean clean-libs run
+.PHONY: build run clean
 
 build: $(BIN)
-build-libs:
-	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) build; )
+run: $(BIN)
+	./$(BIN)
 clean:
 	$(RM) $(OBJS) $(BIN)
-clean-libs:
-	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) clean; )
-run: $(BIN)
-	$(BIN) 453 ../reference.so $(LIB_SOS)
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile

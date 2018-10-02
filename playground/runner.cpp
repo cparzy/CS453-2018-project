@@ -27,9 +27,60 @@
 #include <thread>
 
 // Internal headers
+#include "config.h"
+#ifdef CONFIG_USE_CPP
+    #include "entrypoint.hpp"
+#else
 extern "C" {
-#include <runner.h>
+    #include "entrypoint.h"
 }
+#endif
+extern "C" {
+#include "runner.h"
+}
+
+// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+
+/** Simple lock wrapper class.
+**/
+class LockWrap final {
+private:
+#ifdef CONFIG_USE_CPP
+    Lock lock;
+#else
+    struct lock_t lock;
+#endif
+public:
+    /** Default constructor.
+    **/
+    LockWrap(): lock{} {
+#if !defined(CONFIG_USE_CPP)
+        if (!::lock_init(&lock))
+            throw ::std::runtime_error{"Unable to initialize the lock"};
+#endif
+    }
+    /** Destructor.
+    **/
+    ~LockWrap() {
+#if !defined(CONFIG_USE_CPP)
+        ::lock_cleanup(&lock);
+#endif
+    }
+public:
+    /** Just get a pointer/reference to the wrapped lock.
+     * @return Pointer/reference to the wrapper lock
+    **/
+#ifdef CONFIG_USE_CPP
+    Lock& get() {
+        return lock;
+    }
+#else
+    lock_t* get() {
+        return &lock;
+    }
+#endif
+};
+
 
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
@@ -69,11 +120,12 @@ int main(int argc [[gnu::unused]], char** argv [[gnu::unused]]) {
             res = 4;
         return static_cast<size_t>(res);
     }();
+    LockWrap lockwrap;
     ::std::thread threads[nbworkers];
     for (size_t i = 0; i < nbworkers; ++i) {
-        threads[i] = ::std::thread{[=]() {
-            entry_point(nbworkers, i);
-        }};
+        threads[i] = ::std::thread{[&](size_t i) {
+            entry_point(nbworkers, i, lockwrap.get());
+        }, i};
     }
     for (auto&& thread: threads)
         thread.join();

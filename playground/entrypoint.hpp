@@ -1,5 +1,5 @@
 /**
- * @file   runner.h
+ * @file   entrypoint.hpp
  * @author Sébastien Rouault <sebastien.rouault@epfl.ch>
  *
  * @section LICENSE
@@ -18,17 +18,35 @@
  *
  * @section DESCRIPTION
  *
- * Trivial program that call a function in several threads.
+ * Interface for the entry point.
 **/
 
 #pragma once
 
-// External headers
-#include <stddef.h>
+// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
-// Internal headers
-#include "config.h"
+/** Your lock class.
+**/
+class Lock final {
+public:
+    Lock();
+    ~Lock();
+public:
+    void acquire();
+    void release();
+public:
+    /** Forward call to 'acquire', for this class to satisfy 'BasicLockable' concept.
+    **/
+    void lock() {
+        acquire();
+    }
+    /** Forward call to 'release', for this class to satisfy 'BasicLockable' concept.
+    **/
+    void unlock() {
+        release();
+    }
+};
 
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
-void shared_access(void);
+void entry_point(size_t, size_t, Lock&);

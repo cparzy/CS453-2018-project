@@ -23,9 +23,5 @@
 
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
-// Comment to use the C version
-#define CONFIG_USE_CPP
-
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
-
+void shared_access(void);
 void entry_point(size_t, size_t);

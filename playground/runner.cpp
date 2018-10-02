@@ -22,12 +22,37 @@
 **/
 
 // External headers
+#include <atomic>
 #include <iostream>
 #include <thread>
 
 // Internal headers
 extern "C" {
 #include <runner.h>
+}
+
+// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+
+// Shared memory
+static int counter = 0;
+static ::std::atomic<int> check_counter{0};
+
+/** Performs some operations on some shared memory.
+**/
+void shared_access() {
+    ++counter;
+    check_counter.fetch_add(1, ::std::memory_order_relaxed);
+}
+
+/** (Empirically) check that concurrent operations did not break consistency, warn accordingly.
+**/
+static void shared_check() {
+    auto calls = check_counter.load(::std::memory_order_relaxed);
+    if (counter == calls) {
+        ::std::cout << "** No inconsistency detected (" << counter << " == " << calls << ") **" << ::std::endl;
+    } else {
+        ::std::cout << "** Inconsistency detected (" << counter << " != " << calls << ") **" << ::std::endl;
+    }
 }
 
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
@@ -52,5 +77,6 @@ int main(int argc [[gnu::unused]], char** argv [[gnu::unused]]) {
     }
     for (auto&& thread: threads)
         thread.join();
+    shared_check();
     return 0;
 }

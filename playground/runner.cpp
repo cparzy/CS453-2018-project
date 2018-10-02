@@ -27,17 +27,8 @@
 #include <thread>
 
 // Internal headers
-#include "config.h"
-#ifdef CONFIG_USE_CPP
-    #include "entrypoint.hpp"
-#else
-extern "C" {
-    #include "entrypoint.h"
-}
-#endif
-extern "C" {
-#include "runner.h"
-}
+#include "entrypoint.hpp"
+#include "runner.hpp"
 
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
@@ -45,40 +36,21 @@ extern "C" {
 **/
 class LockWrap final {
 private:
-#ifdef CONFIG_USE_CPP
     Lock lock;
-#else
-    struct lock_t lock;
-#endif
 public:
     /** Default constructor.
     **/
-    LockWrap(): lock{} {
-#if !defined(CONFIG_USE_CPP)
-        if (!::lock_init(&lock))
-            throw ::std::runtime_error{"Unable to initialize the lock"};
-#endif
-    }
+    LockWrap(): lock{} {}
     /** Destructor.
     **/
-    ~LockWrap() {
-#if !defined(CONFIG_USE_CPP)
-        ::lock_cleanup(&lock);
-#endif
-    }
+    ~LockWrap() {}
 public:
-    /** Just get a pointer/reference to the wrapped lock.
+    /** Just gets a pointer/reference to the wrapped lock.
      * @return Pointer/reference to the wrapper lock
     **/
-#ifdef CONFIG_USE_CPP
-    Lock& get() {
+    auto& get() {
         return lock;
     }
-#else
-    lock_t* get() {
-        return &lock;
-    }
-#endif
 };
 
 
@@ -95,7 +67,7 @@ void shared_access() {
     check_counter.fetch_add(1, ::std::memory_order_relaxed);
 }
 
-/** (Empirically) check that concurrent operations did not break consistency, warn accordingly.
+/** (Empirically) checks that concurrent operations did not break consistency, warn accordingly.
 **/
 static void shared_check() {
     auto calls = check_counter.load(::std::memory_order_relaxed);
@@ -120,11 +92,11 @@ int main(int argc [[gnu::unused]], char** argv [[gnu::unused]]) {
             res = 4;
         return static_cast<size_t>(res);
     }();
-    LockWrap lockwrap;
+    Lock lock;
     ::std::thread threads[nbworkers];
     for (size_t i = 0; i < nbworkers; ++i) {
         threads[i] = ::std::thread{[&](size_t i) {
-            entry_point(nbworkers, i, lockwrap.get());
+            entry_point(nbworkers, i, lock);
         }, i};
     }
     for (auto&& thread: threads)

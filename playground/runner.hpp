@@ -1,5 +1,5 @@
 /**
- * @file   entrypoint.h
+ * @file   runner.hpp
  * @author Sébastien Rouault <sebastien.rouault@epfl.ch>
  *
  * @section LICENSE
@@ -18,26 +18,11 @@
  *
  * @section DESCRIPTION
  *
- * Interface for the entry point.
+ * Trivial program that call a function in several threads.
 **/
 
 #pragma once
 
-// External headers
-#include <stdbool.h>
-#include <stddef.h>
-
 // ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
 
-/** Your lock type.
-**/
-struct lock_t {};
-
-bool lock_init(struct lock_t*);
-void lock_cleanup(struct lock_t*);
-void lock_acquire(struct lock_t*);
-void lock_release(struct lock_t*);
-
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
-
-void entry_point(size_t, size_t, struct lock_t*);
+void shared_access();

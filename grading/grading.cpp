@@ -27,6 +27,7 @@
 // External headers
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <iostream>
 #include <random>
 #include <thread>
@@ -105,6 +106,7 @@ EXCEPTION(Any, ::std::exception, "exception");
     EXCEPTION(Transaction, Any, "transaction manager exception");
         EXCEPTION(TransactionCreate, Module, "shared memory region creation failed");
         EXCEPTION(TransactionBegin, Module, "transaction begin failed");
+    EXCEPTION(TooSlow, Any, "non-reference module takes too long to process the transactions");
 
 #undef EXCEPTION
 
@@ -318,10 +320,15 @@ public:
     void start() noexcept {
         local = convert(::clock_gettime);
     }
+    /** Measure a time segment.
+    **/
+    auto delta() noexcept {
+        return convert(::clock_gettime) - local;
+    }
     /** Stop measuring a time segment, and add it to the total.
     **/
     void stop() noexcept {
-        total += convert(::clock_gettime) - local;
+        total += delta();
     }
     /** Reset the total tick counter.
     **/
@@ -521,6 +528,12 @@ static void pause() {
 #endif
 }
 
+/** Pause execution for a longer time.
+**/
+static void long_pause() {
+    ::std::this_thread::sleep_for(::std::chrono::milliseconds(200));
+}
+
 /** Tailored thread synchronization class.
 **/
 class Sync final {
@@ -561,9 +574,12 @@ public:
         status.store(Status::Quit, ::std::memory_order_release);
     }
     /** Master wait for all workers to finish.
+     * @param maxtick Maximum number of ticks to wait before exiting the process on an error
      * @return Whether all workers finished on success
     **/
-    bool master_wait() noexcept {
+    bool master_wait(Chrono::Tick maxtick) {
+        Chrono chrono;
+        chrono.start();
         while (true) {
             switch (status.load(::std::memory_order_relaxed)) {
             case Status::Done:
@@ -571,7 +587,9 @@ public:
             case Status::Fail:
                 return false;
             default:
-                pause();
+                long_pause();
+                if (maxtick != Chrono::invalid_tick && chrono.delta() > maxtick)
+                    throw Exception::TooSlow{};
             }
         }
     }
@@ -618,43 +636,52 @@ public:
  * @param nbthreads Number of concurrent threads to use
  * @param nbrepeats Number of repetitions (keep the median)
  * @param seed      Seed to use
- * @return Whether no inconsistency have been *passively* detected, median execution time (in ns) (undefined if inconsistency)
+ * @param maxtick   Maximum number of ticks to wait before deeming a time-out
+ * @return Whether no inconsistency have been *passively* detected, median execution time (in ns) (undefined if inconsistency detected)
 **/
-static auto measure(Workload& workload, unsigned int const nbthreads, unsigned int const nbrepeats, Seed seed) {
+static auto measure(Workload& workload, unsigned int const nbthreads, unsigned int const nbrepeats, Seed seed, Chrono::Tick maxtick) {
     ::std::thread threads[nbthreads];
     Sync sync{nbthreads}; // "As-synchronized-as-possible" starts so that threads interfere "as-much-as-possible"
     for (unsigned int i = 0; i < nbthreads; ++i) { // Start threads
-        threads[i] = ::std::thread{[&]() {
+        threads[i] = ::std::thread{[&](unsigned int i) {
             try {
+                size_t count = 0;
                 while (true) {
                     if (!sync.worker_wait())
                         return;
-                    sync.worker_notify(workload.run(seed));
+                    sync.worker_notify(workload.run(seed + nbthreads * count + i));
+                    ++count;
                 }
             } catch (::std::exception const& err) {
                 sync.worker_notify(false); // Exception in workload, since sync.* cannot throw
                 ::std::cerr << "⎧ *** EXCEPTION - worker thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
                 return;
             }
-        }};
+        }, i};
     }
-    decltype(workload.get_time()) times[nbrepeats];
-    bool res = true;
-    for (unsigned int i = 0; i < nbrepeats; ++i) { // Repeat measurement
-        sync.master_notify();
-        if (!sync.master_wait()) {
-            res = false;
-            goto join;
+    try {
+        decltype(workload.get_time()) times[nbrepeats];
+        bool res = true;
+        for (unsigned int i = 0; i < nbrepeats; ++i) { // Repeat measurement
+            sync.master_notify();
+            if (!sync.master_wait(maxtick)) {
+                res = false;
+                goto join;
+            }
+            times[i] = workload.get_time();
         }
-        times[i] = workload.get_time();
+        ::std::nth_element(times, times + (nbrepeats >> 1), times + nbrepeats); // Partial-sort times around the median
+        join: {
+            sync.master_join(); // Join with threads
+            for (unsigned int i = 0; i < nbthreads; ++i)
+                threads[i].join();
+        }
+        return ::std::make_tuple(res, times[nbrepeats >> 1]);
+    } catch (...) {
+        for (unsigned int i = 0; i < nbthreads; ++i) // Detach threads to avoid termination due to attached thread going out of scope
+            threads[i].detach();
+        throw;
     }
-    ::std::nth_element(times, times + (nbrepeats >> 1), times + nbrepeats); // Partial-sort times around the median
-    join: {
-        sync.master_join(); // Join with threads
-        for (unsigned int i = 0; i < nbthreads; ++i)
-            threads[i].join();
-    }
-    return ::std::make_tuple(res, times[nbrepeats >> 1]);
 }
 
 /** Program entry point.
@@ -674,25 +701,35 @@ int main(int argc, char** argv) {
                 res = 16;
             return static_cast<size_t>(res);
         }();
-        auto const nbtxperwrk   = 10000000ul;
+        auto const nbtxperwrk   = 1000000ul;
         auto const nbaccounts   = 4 * nbworkers;
         auto const init_balance = 100;
         auto const prob_long    = 0.5f;
-        auto const nbrepeats    = 3;
+        auto const nbrepeats    = 11;
         auto const seed         = static_cast<Seed>(::std::stoul(argv[1]));
-        ::std::cout << "⎧ Number of worker threads: " << nbworkers << ::std::endl;
-        ::std::cout << "⎪ Number of TX per worker:  " << nbtxperwrk << ::std::endl;
-        ::std::cout << "⎪ Total number of accounts: " << nbaccounts << ::std::endl;
-        ::std::cout << "⎪ Initial account balance:  " << init_balance << ::std::endl;
-        ::std::cout << "⎪ Long TX probability:      " << prob_long << ::std::endl;
-        ::std::cout << "⎪ Number of repetitions:    " << nbrepeats << ::std::endl;
-        ::std::cout << "⎩ Seed value:               " << seed << ::std::endl;
+        auto const slow_factor  = 2ul;
+        ::std::cout << "⎧ #worker threads:     " << nbworkers << ::std::endl;
+        ::std::cout << "⎪ #TX per worker:      " << nbtxperwrk << ::std::endl;
+        ::std::cout << "⎪ #repetitions:        " << nbrepeats << ::std::endl;
+        ::std::cout << "⎪ Initial #accounts:   " << nbaccounts << ::std::endl;
+        ::std::cout << "⎪ Initial balance:     " << init_balance << ::std::endl;
+        ::std::cout << "⎪ Long TX probability: " << prob_long << ::std::endl;
+        ::std::cout << "⎪ Slow trigger factor: " << slow_factor << ::std::endl;
+        ::std::cout << "⎩ Seed value:          " << seed << ::std::endl;
         auto&& eval = [&](char const* path, Chrono::Tick reference) { // Library evaluation
             try {
                 ::std::cout << "⎧ Evaluating '" << path << "'" << (reference == Chrono::invalid_tick ? " (reference)" : "") << "..." << ::std::endl;
                 TransactionalLibrary tl{path};
                 Bank bank{tl, nbaccounts, nbtxperwrk, init_balance, prob_long};
-                auto res     = measure(bank, nbworkers, nbrepeats, seed);
+                auto maxtick = [](auto reference) {
+                    if (reference == Chrono::invalid_tick)
+                        return Chrono::invalid_tick;
+                    reference *= slow_factor;
+                    if (unlikely(reference == Chrono::invalid_tick)) // Bad luck...
+                        ++reference;
+                    return reference;
+                }(reference);
+                auto res     = measure(bank, nbworkers, nbrepeats, seed, maxtick);
                 auto correct = ::std::get<0>(res) && bank.check();
                 auto perf    = ::std::get<1>(res);
                 if (unlikely(!correct)) {
@@ -705,6 +742,9 @@ int main(int argc, char** argv) {
                     ::std::cout << "⎩ Average TX execution time: " << (perf / static_cast<double>(nbworkers) / static_cast<double>(nbtxperwrk)) << " ns" << ::std::endl;
                 }
                 return ::std::make_tuple(correct, perf);
+            } catch (Exception::TooSlow const& err) { // Special case since interrupting threads may lead to corrupted state
+                ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
+                ::std::exit(1);
             } catch (::std::exception const& err) {
                 ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
                 return ::std::make_tuple(false, 0.);

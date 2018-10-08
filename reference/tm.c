@@ -45,7 +45,7 @@
 // Internal headers
 #include <tm.h>
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 /** Define a proposition as likely true.
  * @param prop Proposition
@@ -83,7 +83,7 @@
     #warning This compiler has no support for GCC attributes
 #endif
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 #if defined(USE_TICKET_LOCK)
 struct lock_t {
@@ -100,10 +100,11 @@ struct region {
     struct lock_t lock; // Global lock
     void* start;        // Start of the shared memory region
     size_t size;        // Size of the shared memory region (in bytes)
-    size_t align;       // Alignment of the shared memory region (in bytes)
+    size_t align;       // Claimed alignment of the shared memory region (in bytes)
+    size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
 };
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 /** Pause for a very short amount of time.
 **/
@@ -175,34 +176,29 @@ static void lock_release(struct lock_t* lock) {
 #endif
 }
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
-/** Initial allocation of a shared memory region.
- * @param size  Size of the shared memory region to allocate (in bytes)
- * @param align Power of 2 alignment of the allocated, shared memory region
- * @return Opaque shared memory region handle, NULL on failure
-**/
 shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));
-    if (unlikely(!region))
-        return NULL;
-    if (unlikely(posix_memalign(&(region->start), align, size) != 0)) {
+    if (unlikely(!region)) {
+        return invalid_shared;
+    }
+    size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align;
+    if (unlikely(posix_memalign(&(region->start), align_alloc, size) != 0)) {
         free(region);
-        return NULL;
+        return invalid_shared;
     }
     if (unlikely(!lock_init(&(region->lock)))) {
         free(region->start);
         free(region);
-        return NULL;
+        return invalid_shared;
     }
-    region->size  = size;
-    region->align = align;
+    region->size        = size;
+    region->align       = align;
+    region->align_alloc = align_alloc;
     return region;
 }
 
-/** Clean-up the given shared memory region.
- * @param shared Shared memory region to clean-up, with no running transaction
-**/
 void tm_destroy(shared_t shared) {
     struct region* region = (struct region*) shared;
     lock_cleanup(&(region->lock));
@@ -210,67 +206,46 @@ void tm_destroy(shared_t shared) {
     free(region);
 }
 
-/** [thread-safe] Return the start address of the given shared memory region.
- * @param shared Shared memory region to query
- * @return Start address (this function never fails if 'shared' has not been destroyed)
-**/
 void* tm_start(shared_t shared) {
     return ((struct region*) shared)->start;
 }
 
-/** [thread-safe] Return the size/alignment (in bytes) of the given shared memory region.
- * @param shared Shared memory region to query
- * @return Region size/alignment (this function never fails if 'shared' has not been destroyed)
-**/
 size_t tm_size(shared_t shared) {
     return ((struct region*) shared)->size;
 }
+
 size_t tm_align(shared_t shared) {
     return ((struct region*) shared)->align;
 }
 
-/** [thread-safe] Begin a new transaction on the given shared memory region.
- * @param shared Shared memory region to start a transaction on
- * @return Opaque transaction ID, 'invalid_tx' on failure
-**/
 tx_t tm_begin(shared_t shared) {
     if (unlikely(!lock_acquire(&(((struct region*) shared)->lock))))
         return invalid_tx;
-    return 1; // There can be only one transaction running => ID is useless
+    return invalid_tx + 1; // There can be only one transaction running => ID is useless
 }
 
-/** [thread-safe] End the given transaction.
- * @param shared Shared memory region to start a transaction on
- * @param tx     Transaction to end
- * @return Whether the whole transaction is a success
-**/
 bool tm_end(shared_t shared, tx_t tx as(unused)) {
     lock_release(&(((struct region*) shared)->lock));
     return true;
 }
 
-/** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
- * @param shared Shared memory region to start a transaction on
- * @param tx     Transaction to use
- * @param source Source start address
- * @param size   Source/target range
- * @param target Target start address
- * @return Whether the whole transaction can continue
-**/
 bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source, size_t size, void* target) {
     memcpy(target, source, size);
     return true;
 }
 
-/** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.
- * @param shared Shared memory region to start a transaction on
- * @param tx     Transaction to use
- * @param source Source start address
- * @param size   Source/target range
- * @param target Target start address
- * @return Whether the whole transaction can continue
-**/
 bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source, size_t size, void* target) {
     memcpy(target, source, size);
+    return true;
+}
+
+alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) {
+    if (unlikely(posix_memalign(target, ((struct region*) shared)->align_alloc, size) != 0)) // Allocation failed
+        return nomem_alloc;
+    return success_alloc;
+}
+
+bool tm_free(shared_t shared as(unused), tx_t tx as(unused), void* target) {
+    free(target);
     return true;
 }

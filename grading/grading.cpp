@@ -49,7 +49,7 @@ extern "C" {
 }
 }
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 /** Define a proposition as likely true.
  * @param prop Proposition
@@ -75,7 +75,7 @@ extern "C" {
         (prop)
 #endif
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 namespace Exception {
 
@@ -106,13 +106,14 @@ EXCEPTION(Any, ::std::exception, "exception");
     EXCEPTION(Transaction, Any, "transaction manager exception");
         EXCEPTION(TransactionCreate, Module, "shared memory region creation failed");
         EXCEPTION(TransactionBegin, Module, "transaction begin failed");
+        EXCEPTION(TransactionAlloc, Module, "memory allocation failed (insufficient memory)");
     EXCEPTION(TooSlow, Any, "non-reference module takes too long to process the transactions");
 
 #undef EXCEPTION
 
 }
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 /** Transactional library class.
 **/
@@ -141,6 +142,8 @@ private:
     FnEnd     tm_end;     // Module's transaction end function
     FnRead    tm_read;    // Module's shared memory read function
     FnWrite   tm_write;   // Module's shared memory write function
+    FnAlloc   tm_alloc;   // Module's shared memory allocation function
+    FnFree    tm_free;    // Module's shared memory freeing function
 private:
     /** Solve a symbol from its name, and bind it to the given function.
      * @param name Name of the symbol to resolve
@@ -162,8 +165,6 @@ public:
     TransactionalLibrary& operator=(TransactionalLibrary const&) = delete;
     /** Loader constructor.
      * @param path  Path to the library to load
-     * @param size  Size of the shared memory region to allocate
-     * @param align Shared memory region required alignment
     **/
     TransactionalLibrary(char const* path) {
         { // Resolve path and load module
@@ -184,6 +185,8 @@ public:
             solve("tm_end", tm_end);
             solve("tm_read", tm_read);
             solve("tm_write", tm_write);
+            solve("tm_alloc", tm_alloc);
+            solve("tm_free", tm_free);
         }
     }
     /** Unloader destructor.
@@ -214,12 +217,12 @@ public:
     TransactionalMemory& operator=(TransactionalMemory const&) = delete;
     /** Bind constructor.
      * @param library Transactional library to use
-     * @param size    Size of the shared memory region to allocate
      * @param align   Shared memory region required alignment
+     * @param size    Size of the shared memory region to allocate
     **/
-    TransactionalMemory(TransactionalLibrary const& library, size_t size, size_t align): tl{library} {
+    TransactionalMemory(TransactionalLibrary const& library, size_t align, size_t size): tl{library} {
         { // Initialize shared memory region
-            shared = tl.tm_create(size, align >= sizeof(void*) ? align : sizeof(void*));
+            shared = tl.tm_create(size, align);
             if (unlikely(shared == TM::invalid_shared))
                 throw Exception::TransactionCreate{};
             start_addr = reinterpret_cast<uintptr_t>(tl.tm_start(shared));
@@ -275,9 +278,29 @@ public:
     auto write(TX tx, void const* source, size_t size, void* target) noexcept {
         return tl.tm_write(shared, tx, source, size, target);
     }
+    /** [thread-safe] Memory allocation operation in the given transaction, throw if no memory available.
+     * @param tx     Transaction to use
+     * @param size   Size to allocate
+     * @param target Target start address
+     * @return Whether the whole transaction can continue
+    **/
+    auto alloc(TX tx, size_t size, void** target) {
+        auto status = tl.tm_alloc(shared, tx, size, target);
+        if (unlikely(status == TM::nomem_alloc))
+            throw Exception::TransactionAlloc{};
+        return status == TM::success_alloc;
+    }
+    /** [thread-safe] Memory freeing operation in the given transaction.
+     * @param tx     Transaction to use
+     * @param target Target start address
+     * @return Whether the whole transaction can continue
+    **/
+    auto free(TX tx, void* target) noexcept {
+        return tl.tm_free(shared, tx, target);
+    }
 };
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 /** Seed type.
 **/
@@ -363,10 +386,10 @@ public:
     Workload& operator=(Workload const&) = delete;
     /** Transaction library constructor.
      * @param library Transactional library to use
-     * @param size    Size of the shared memory region to allocate
      * @param align   Shared memory region required alignment
+     * @param size    Size of the shared memory region to allocate
     **/
-    Workload(TransactionalLibrary const& library, size_t size, size_t align): tl{library}, tm{tl, size, align}, sum{0} {
+    Workload(TransactionalLibrary const& library, size_t align, size_t size): tl{library}, tm{tl, align, size}, sum{0} {
     }
     /** Virtual destructor.
     **/
@@ -424,7 +447,7 @@ public:
      * @param init_balance Initial account balance
      * @param prob_long    Probability of running a long, read-only control transaction
     **/
-    Bank(TransactionalLibrary const& library, size_t nbaccounts, size_t nbtxperwrk, int init_balance, float prob_long): Workload{library, sizeof(int) * nbaccounts, alignof(int)}, nbaccounts{nbaccounts}, nbtxperwrk{nbtxperwrk}, init_balance{init_balance}, prob_long{prob_long} {
+    Bank(TransactionalLibrary const& library, size_t nbaccounts, size_t nbtxperwrk, int init_balance, float prob_long): Workload{library, sizeof(int), sizeof(int) * nbaccounts}, nbaccounts{nbaccounts}, nbtxperwrk{nbtxperwrk}, init_balance{init_balance}, prob_long{prob_long} {
         do {
             auto tx = tm.begin();
             auto&& init_fn = [&]() {
@@ -516,7 +539,7 @@ public:
     }
 };
 
-// ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+// -------------------------------------------------------------------------- //
 
 /** Pause execution.
 **/

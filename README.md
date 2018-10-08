@@ -54,7 +54,7 @@ You may read and inspire from existing STM libraries, but it must be **your own 
 * SuperMicro 4 sockets server
 * 4 Processors: AMD Opteron 12-core Processor 6172 at 2.1 Ghz. Total: 48 cores
 * 32 GB of RAM
-* Ubuntu 16.04.5 LTS (GNU/Linux 4.4.0-128-generic x86_64) 
+* Ubuntu 16.04.5 LTS (GNU/Linux 4.4.0-128-generic x86_64)
 * `g++` and `gcc` versions 5.4.0 20160609
 * `clang` and `clang++` versions 3.8.0-2ubuntu4
 
@@ -154,7 +154,8 @@ Transactions executed on the same shared region must satisfy three properties:
 
 * **Consistency**
 
-   If a transaction *observes* one update from another, committed transaction, then it *observes* all of its updates.
+   The memory operations of a transaction take place in (program) order.
+   Transactions are committed one transaction at a time.
 
 * **Isolation**
 

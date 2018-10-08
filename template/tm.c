@@ -163,7 +163,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 **/
 alloc_t tm_alloc(shared_t shared as(unused), tx_t tx as(unused), size_t size as(unused), void** target as(unused)) {
     // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
-    return retry_alloc;
+    return abort_alloc;
 }
 
 /** [thread-safe] Memory freeing in the given transaction.

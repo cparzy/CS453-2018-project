@@ -51,7 +51,11 @@ You may read and inspire from existing STM libraries, but it must be **your own 
 
 ### Evaluation machine
 
-*Precise specification to come.*
+* Dell Poweredge R930 server
+* 4 Processors Intel(R) Xeon(R) E7-4830 v3 (12 cores, 30MB cache) --- Total 48 physical cores, 96 hardware contexts
+* 512 GB of RAM
+* Ubuntu 16.04.5 LTS (GNU/Linux 4.4.0-128-generic x86_64)
+* `g++` and `gcc` versions 5.4.0 20160609
 
 
 ## How to write my own STM?

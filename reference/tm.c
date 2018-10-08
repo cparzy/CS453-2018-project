@@ -239,7 +239,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     return true;
 }
 
-alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) {
+alloc_t tm_alloc(shared_t shared, tx_t tx as(unused), size_t size, void** target) {
     if (unlikely(posix_memalign(target, ((struct region*) shared)->align_alloc, size) != 0)) // Allocation failed
         return nomem_alloc;
     return success_alloc;

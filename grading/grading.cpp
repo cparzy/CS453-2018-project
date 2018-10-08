@@ -131,6 +131,8 @@ private:
     using FnEnd     = decltype(&TM::tm_end);
     using FnRead    = decltype(&TM::tm_read);
     using FnWrite   = decltype(&TM::tm_write);
+    using FnAlloc   = decltype(&TM::tm_alloc);
+    using FnFree    = decltype(&TM::tm_free);
 private:
     void*     module;     // Module opaque handler
     FnCreate  tm_create;  // Module's initialization function

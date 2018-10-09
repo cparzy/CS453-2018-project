@@ -141,7 +141,7 @@ A **shared memory region** is a non-empty set of shared memory segments.
 Shared memory region creation and destruction are respectively managed by `tm_create` and `tm_destroy`.
 The content of the shared memory region is *only* accessed from inside a transaction, and *solely* by the use of the functions mentioned below.
 
-A **transaction** consists of a sequence of `tm_read`, `tm_write`, `tm_alloc`, `tm_free` operations in a shared memory region, enclosed between a call to `tm_begin` and a call to `tm_end`.
+A **transaction** consists of a sequence of `tm_read`, `tm_write`, `tm_alloc`, `tm_free` operations in a shared memory region, enclosed between a call to `tm_begin` and a call to `tm_end` (as well as any number of non-transactional operations).
 A transaction is executed on one and only one shared memory region.
 A transaction either *commits* its speculative updates to the shared memory region when `tm_end` is reached, or *aborts* its execution (discarding its speculative updates) at any time (see the reference).
 When a transaction is aborted, the *user* (i.e. the `grading` tool for this project) is responsible for retrying the *same* transaction (i.e. *going back* to the same `tm_begin` call site).

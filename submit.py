@@ -43,8 +43,8 @@ import socket
 
 version_uid = b"\x00\x00\x00\x00" # Unique version identifier (must be identical in compatible server)
 
-default_host = "lpdquad.epfl.ch" # Default server hostname
-default_port = 9999              # Default server TCP port
+default_host = "lpd48core.epfl.ch" # Default server hostname
+default_port = 9999                # Default server TCP port
 
 # ---------------------------------------------------------------------------- #
 # Command line
@@ -189,7 +189,7 @@ if socket_recvfield(client_fd, len(version_uid)) != version_uid:
 # Send the secret user identifier
 socket_sendfield(client_fd, args.uuid.encode())
 res = socket_recvfield(client_fd, 1, exact=True)
-msg = {1: "Invalid user secret identifier", 2: "Unknown user secret idetifier", 3: "User is already logged in"}
+msg = {1: "Invalid user secret identifier", 2: "Unknown user secret identifier", 3: "User is already logged in"}
 if res[0] in msg:
   print(msg[res[0]]) # Unsuccessful identifications are logged
   exit(1)

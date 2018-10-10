@@ -154,8 +154,8 @@ Transactions executed on the same shared region must satisfy three properties:
 
 * **Consistency**
 
-   The memory operations of a transaction take place in (program) order.
-   Transactions are committed one transaction at a time.
+   A (pending) transaction observes its own modifications, e.g. a read following one or more writes observes the last value written in program order.
+   Transactions appear to have been committed one at a time.
 
 * **Isolation**
 
@@ -176,6 +176,8 @@ Create (i.e. allocate + init) a new shared memory region, with one first, non-fr
 
 > **NB:** the requested alignment in that function will be the alignment assumed in every subsequent memory operation.
 
+> **NB:** the first allocated segment must be initialized with 0.
+
 &nbsp;
 
 Destroy (i.e. clean-up + free) a given shared memory region.
@@ -188,9 +190,11 @@ Destroy (i.e. clean-up + free) a given shared memory region.
 
 > **NB:** no concurrent call for the same shared memory region.
 
-> **NB:** it is guaranteed that the associated shared memory region has not been destroyed yet.
+> **NB:** it is guaranteed that when this function is called the associated shared memory region has not been destroyed yet.
 
-> **NB:** no transaction is running on the shared memory region when this function is called.
+> **NB:** it is guaranteed that no transaction is running on the shared memory region when this function is called.
+
+> **NB:** the first allocated segment, along with all the segments that were allocated with `tm_alloc` but not freed with `tm_free` at the time of the call, must be freed by this function.
 
 &nbsp;
 
@@ -204,9 +208,11 @@ Return the start address of the first allocated segment in the shared memory reg
 
 **Return:** Start address of the first allocated segment
 
-> **NB:** of course, the returned address must be aligned on the shared region alignment
+> **NB:** this function can be called concurrently.
 
-> **NB:** this function never fails: it must always return the address of the first allocated segment, which is not free-able
+> **NB:** the returned address must be aligned on the shared region alignment.
+
+> **NB:** this function never fails: it must always return the address of the first allocated segment, which is not free-able.
 
 &nbsp;
 
@@ -220,9 +226,11 @@ Return the size (in bytes) of the first allocated segment in the shared memory r
 
 **Return:** First allocated segment size (in bytes)
 
-> **NB:** of course, the returned size must be aligned on the shared region alignment
+> **NB:** this function can be called concurrently.
 
-> **NB:** this function never fails: it must always return the size of the first allocated segment, which is not free-able
+> **NB:** the returned size must be aligned on the shared region alignment.
+
+> **NB:** this function never fails: it must always return the size of the first allocated segment, which is not free-able.
 
 &nbsp;
 
@@ -236,6 +244,8 @@ Return the alignment (in bytes) of the memory accesses on given shared memory re
 
 **Return:** Alignment used globally (in bytes)
 
+> **NB:** this function can be called concurrently.
+
 &nbsp;
 
 Begin a new transaction on the given shared memory region.
@@ -248,7 +258,9 @@ Begin a new transaction on the given shared memory region.
 
 **Return:** Opaque transaction identifier
 
-> **NB:** this function can be called concurrently
+> **NB:** this function can be called concurrently.
+
+> **NB:** there is no concept of nested transactions, i.e. one transaction started in another transaction.
 
 &nbsp;
 
@@ -263,9 +275,9 @@ End the given transaction.
 
 **Return:** Whether the whole transaction committed
 
-> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter
+> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** this function will not be called by the *user* (e.g. the `grading` tool) when any of `tm_read`, `tm_write`, `tm_alloc`, `tm_free` notifies that the transaction was aborted
+> **NB:** this function will not be called by the *user* (e.g. the `grading` tool) when any of `tm_read`, `tm_write`, `tm_alloc`, `tm_free` notifies that the transaction was aborted.
 
 &nbsp;
 
@@ -277,17 +289,21 @@ Read operation in the given transaction, source in the shared region and target 
 | :-------- | :---------- |
 | `shared` | Shared memory region associated with the transaction |
 | `tx` | Transaction to use |
-| `source` | Source start address (in the shared region) |
+| `source` | Source (aligned) start address (in shared memory) |
 | `size` | Length to copy (in bytes) |
-| `target` | Target start address (in a private region) |
+| `target` | Target (aligned) start address (in private memory) |
 
 **Return:** Whether the whole transaction can continue
 
-> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter
+> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** private buffer only writable for the duration of the call
+> **NB:** the private buffer `target` is only writable for the duration of the call.
 
-> **NB:** the length must be a positive multiple of the shared memory region's alignment
+> **NB:** the length `size` must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
+
+> **NB:** the length of the buffers `source` and `target` must be at least `size`, otherwise the behavior is undefined.
+
+> **NB:** the `source` and `target` addresses must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
 
 &nbsp;
 
@@ -299,17 +315,21 @@ Write operation in the given transaction, source in a private region and target 
 | :-------- | :---------- |
 | `shared` | Shared memory region associated with the transaction |
 | `tx` | Transaction to use |
-| `source` | Source start address (in the shared region) |
+| `source` | Source (aligned) start address (in private memory) |
 | `size` | Length to copy (in bytes) |
-| `target` | Transaction to use |
+| `target` | Target (aligned) start address (in shared memory) |
 
 **Return:** Whether the whole transaction can continue
 
-> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter
+> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** private buffer only readable for the duration of the call
+> **NB:** the private buffer `source` is only readable for the duration of the call.
 
-> **NB:** the length must be a positive multiple of the shared memory region's alignment
+> **NB:** the length `size` must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
+
+> **NB:** the length of the buffers `source` and `target` must be at least `size`, otherwise the behavior is undefined.
+
+> **NB:** the `source` and `target` addresses must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
 
 &nbsp;
 
@@ -326,13 +346,19 @@ Memory allocation in the given transaction.
 
 **Return:** One of: `success_alloc` (allocation was successful and transaction can continue), `abort_alloc` (transaction was aborted) and `nomem_alloc` (memory allocation failed)
 
-> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter
+> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** the size must be a positive multiple of the shared memory region's alignment
+> **NB:** the size must be a positive multiple of the shared memory region's alignment.
 
-> **NB:** value of `*target` is defined only if `success_alloc` was returned, and undefined otherwise
+> **NB:** value of `*target` is defined only if `success_alloc` was returned, and undefined otherwise.
 
-> **NB:** when `nomem_alloc` is returned, the transaction is not aborted
+> **NB:** when `nomem_alloc` is returned, the transaction is not aborted.
+
+> **NB:** the allocated segment must be initialized with 0.
+
+> **NB:** the allocated segment can be freed only with `tm_free`.
+
+> **NB:** the length `size` must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
 
 &nbsp;
 
@@ -344,10 +370,10 @@ Memory freeing in the given transaction.
 | :-------- | :---------- |
 | `shared` | Shared memory region associated with the transaction |
 | `tx` | Transaction to use |
-| `target` | Address of the first byte of the previously allocated segment to deallocate |
+| `target` | Address of the first byte of the previously allocated segment (with `tm_alloc` only) to deallocate |
 
 **Return:** Whether the whole transaction can continue
 
-> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter
+> **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** this function must not be called with `target` as the first allocated segment (the address returned by `tm_start`)
+> **NB:** this function must not be called with `target` as the first allocated segment (the address returned by `tm_start`).

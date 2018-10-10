@@ -214,6 +214,8 @@ Return the start address of the first allocated segment in the shared memory reg
 
 > **NB:** this function never fails: it must always return the address of the first allocated segment, which is not free-able.
 
+> **NB:** the start address returned must not be `NULL`.
+
 &nbsp;
 
 Return the size (in bytes) of the first allocated segment in the shared memory region.
@@ -297,7 +299,7 @@ Read operation in the given transaction, source in the shared region and target 
 
 > **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** the private buffer `target` is only writable for the duration of the call.
+> **NB:** the private buffer `target` can only be dereferenced for the duration of the call.
 
 > **NB:** the length `size` must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
 
@@ -323,7 +325,7 @@ Write operation in the given transaction, source in a private region and target 
 
 > **NB:** this function can be called concurrently, concurrent calls must be made with at least a different `shared` parameter or a different `tx` parameter.
 
-> **NB:** the private buffer `source` is only readable for the duration of the call.
+> **NB:** the private buffer `source` can only be dereferenced for the duration of the call.
 
 > **NB:** the length `size` must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
 
@@ -350,13 +352,17 @@ Memory allocation in the given transaction.
 
 > **NB:** the size must be a positive multiple of the shared memory region's alignment.
 
-> **NB:** value of `*target` is defined only if `success_alloc` was returned, and undefined otherwise.
+> **NB:** the pointer `target` can only be dereferenced for the duration of the call.
+
+> **NB:** the value of `*target` is defined only if `success_alloc` was returned, and undefined otherwise.
+
+> **NB:** the value of `*target` after the call if `success_alloc` was returned must not be `NULL`.
 
 > **NB:** when `nomem_alloc` is returned, the transaction is not aborted.
 
 > **NB:** the allocated segment must be initialized with 0.
 
-> **NB:** the allocated segment can be freed only with `tm_free`.
+> **NB:** only `tm_free` must be used to free the allocated segment.
 
 > **NB:** the length `size` must be a positive multiple of the shared memory region's alignment, otherwise the behavior is undefined.
 

@@ -193,6 +193,7 @@ shared_t tm_create(size_t size, size_t align) {
         free(region);
         return invalid_shared;
     }
+    memset(region->start, 0, size);
     region->size        = size;
     region->align       = align;
     region->align_alloc = align_alloc;
@@ -242,6 +243,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 alloc_t tm_alloc(shared_t shared, tx_t tx as(unused), size_t size, void** target) {
     if (unlikely(posix_memalign(target, ((struct region*) shared)->align_alloc, size) != 0)) // Allocation failed
         return nomem_alloc;
+    memset(*target, 0, size);
     return success_alloc;
 }
 

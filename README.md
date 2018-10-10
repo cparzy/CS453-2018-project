@@ -258,7 +258,7 @@ Begin a new transaction on the given shared memory region.
 | :-------- | :---------- |
 | `shared` | Shared memory region to start a transaction on |
 
-**Return:** Opaque transaction identifier
+**Return:** Opaque transaction identifier, `invalid_tx` on failure
 
 > **NB:** this function can be called concurrently.
 

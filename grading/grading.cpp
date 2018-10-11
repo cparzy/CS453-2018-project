@@ -29,6 +29,7 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <thread>
 extern "C" {
@@ -112,6 +113,22 @@ EXCEPTION(Any, ::std::exception, "exception");
 #undef EXCEPTION
 
 }
+
+// -------------------------------------------------------------------------- //
+
+/** Non-copyable helper base class.
+**/
+class NonCopyable {
+public:
+    /** Deleted copy constructor/assignment.
+    **/
+    NonCopyable(NonCopyable const&) = delete;
+    NonCopyable& operator=(NonCopyable const&) = delete;
+protected:
+    /** Protected default constructor, to make sure class is not directly instantiated.
+    **/
+    NonCopyable() = default;
+};
 
 // -------------------------------------------------------------------------- //
 
@@ -378,6 +395,14 @@ public:
 **/
 class Workload {
 protected:
+    /** Worker context base class.
+    **/
+    class ContextBase: private NonCopyable {};
+public:
+    /** Context class.
+    **/
+    using Context = ::std::unique_ptr<ContextBase>;
+protected:
     TransactionalLibrary const& tl;  // Associated transactional library
     TransactionalMemory         tm;  // Built transactional memory to use
     ::std::atomic<Chrono::Tick> sum; // Sum of the tick over all the runs
@@ -422,11 +447,16 @@ public:
         return res;
     }
 public:
-    /** [thread-safe] Worker full run.
-     * @param seed Seed to use
+    /** [thread-safe] Prepare one worker thread's context.
+     * @param Seed to use
+     * @return Context pointer
+    **/
+    virtual Context prepare(Seed) = 0;
+    /** [thread-safe] One transaction in one worker thread.
+     * @param Associated worker context
      * @return Whether no inconsistency has been (passively) detected
     **/
-    virtual bool run(Seed) = 0;
+    virtual bool run(Context&) = 0;
     /** [thread-safe] Worker full run.
      * @return Whether no inconsistency has been detected
     **/
@@ -436,6 +466,24 @@ public:
 /** Bank workload class.
 **/
 class Bank final: public Workload {
+protected:
+    /** Bank worker context class.
+    **/
+    class BankContext: public ContextBase {
+    public:
+        ::std::minstd_rand engine;
+        ::std::bernoulli_distribution long_dist;
+        ::std::uniform_int_distribution<size_t> account;
+    public:
+        /** Defaulted move constructor/assignment.
+        **/
+        BankContext(BankContext&&) = default;
+        BankContext& operator=(BankContext&&) = default;
+        /** Parameter constructor.
+         * @param ... <to complete>
+        **/
+        BankContext(Seed seed, float prob_long, size_t nbaccounts): engine{seed}, long_dist{prob_long}, account{0, nbaccounts - 1} {}
+    };
 private:
     size_t nbaccounts; // Number of accounts
     size_t nbtxperwrk; // Number of transactions per worker
@@ -494,20 +542,19 @@ private:
         } while (true);
     }
 public:
-    virtual bool run(Seed seed) {
-        ::std::minstd_rand engine{seed};
-        ::std::bernoulli_distribution long_dist{prob_long};
-        ::std::uniform_int_distribution<size_t> account{0, nbaccounts - 1};
-        Chrono chrono;
-        chrono.start();
+    virtual Context prepare(Seed seed) {
+        return ::std::make_unique<BankContext>(seed, prob_long, nbaccounts);
+    }
+    virtual bool run(Context& context) {
+        auto&& ctx = static_cast<BankContext&>(*context);
         for (size_t cntr = 0; cntr < nbtxperwrk;) {
-            if (long_dist(engine)) { // Do a long transaction
+            if (ctx.long_dist(ctx.engine)) { // Do a long transaction
                 if (unlikely(!long_check_tx()))
                     return false;
             } else { // Do a short transaction
                 auto tx = tm.begin();
-                auto acc_a = account(engine);
-                auto acc_b = account(engine); // Of course, might be same as 'acc_a'
+                auto acc_a = ctx.account(ctx.engine);
+                auto acc_b = ctx.account(ctx.engine); // Of course, might be same as 'acc_a'
                 int solde_a, solde_b;
                 if (unlikely(!tm.read(tx, tm.address(acc_a * sizeof(int)), sizeof(int), &solde_a)))
                     continue;
@@ -532,14 +579,14 @@ public:
             }
             ++cntr;
         }
-        chrono.stop();
-        add_tick(chrono);
         return true;
     }
     virtual bool check() {
         return long_check_tx();
     }
 };
+
+// NOTE: Code has not been modified below
 
 // -------------------------------------------------------------------------- //
 

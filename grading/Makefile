@@ -8,6 +8,15 @@ EXT_CXX  := C cc cpp cxx c++
 INCLUDE_DIR := ../include
 SOURCE_DIR  := .
 
+# Path to LIBATOMIC_OPS (or to gcc-specific libatomic_ops)
+ifdef LIBAO_HOME
+  LIBAO_INC = $(LIBAO_HOME)/include
+else
+  LIBAO_INC = $(INCLUDE_DIR)/atomic_ops
+endif
+
+# include $(INCLUDE_DIR)/Makefile.common
+
 WILD_EXT  = $(strip $(foreach EXT,$($(1)),$(wildcard $(2)/*.$(EXT))))
 
 HDRS_C   := $(call WILD_EXT,EXT_H,$(INCLUDE_DIR))
@@ -17,11 +26,11 @@ SRCS_CXX := $(call WILD_EXT,EXT_CXX,$(SOURCE_DIR))
 OBJS     := $(SRCS_C:%=%.o) $(SRCS_CXX:%=%.o)
 
 CC       := $(CC)
-CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -I$(INCLUDE_DIR)
+CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -I$(INCLUDE_DIR) $(CFLAGS)
 CXX      := $(CXX)
-CXXFLAGS := -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -I$(INCLUDE_DIR)
+CXXFLAGS += -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -I$(INCLUDE_DIR) $(CFLAGS)
 LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
-LDFLAGS  :=
+LDFLAGS  +=
 LDLIBS   := -ldl -lpthread
 
 LIB_DIRS := $(filter-out ../include/ ../grading/ ../playground/ ../template/,$(filter-out $(wildcard ../*),$(wildcard ../*/)))

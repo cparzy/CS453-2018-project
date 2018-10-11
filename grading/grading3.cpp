@@ -563,7 +563,7 @@ test(void* thread)
   pthread_exit(NULL);
 }
 
-void
+double
 measure(Workload& workload) {
   struct timeval start, end;
   struct timespec timeout;
@@ -657,7 +657,7 @@ measure(Workload& workload) {
   printf("#txs %zu\t(%-10.0f\n", num_threads, throughput);
   printf("#Mops %.3f\n", throughput / 1e6);  
 
-  pthread_exit(NULL);
+  return throughput;
 
 }
 
@@ -665,7 +665,13 @@ void
 eval(char const* path) {
   TransactionalLibrary tl{path};
   Bank bank{tl, num_accounts, init_balance, prob_long};
-  measure(bank);
+
+  double tputs[nbrepeats];
+  for (int i = 0; i < nbrepeats; i++) {
+    tputs[i] = measure(bank);
+  }
+  ::std::nth_element(tputs, tputs + (nbrepeats >> 1), tputs + nbrepeats); // Partial-sort times around the median
+  printf("Performance of %s: %.2f tx/s (median of %u runs)\n", path,tputs[nbrepeats >> 1], nbrepeats);
 }
 
 int

@@ -693,10 +693,11 @@ main(int argc, char **argv) {
   };
 
   int i, c;
+  char *tl_path, *ref_path;
   while(1) 
   {
     i = 0;
-    c = getopt_long(argc, argv, "hAf:d:i:n:r:s:u:m:l:b:v:f:x:", long_options, &i);
+    c = getopt_long(argc, argv, "hAf:d:i:n:r:s:t:m:l:p:v:f:x:", long_options, &i);
 
     if(c == -1)
       break;
@@ -747,6 +748,12 @@ main(int argc, char **argv) {
       case 'r':
         nbrepeats = atol(optarg);
         break;
+      case 'p':
+        tl_path = optarg;
+        break;
+      case 't':
+        ref_path = optarg;
+        break;
       case '?':
       default:
       printf("Use -h or --help for help\n");
@@ -754,6 +761,7 @@ main(int argc, char **argv) {
     }
   }
 
+  printf("%s ... %s\n", ref_path, tl_path);
   num_accounts = 4 * num_threads;
 
 
@@ -762,8 +770,8 @@ main(int argc, char **argv) {
   tx_count = (ticks *) calloc(num_threads , sizeof(ticks));
 
 
-  eval("../reference.so");
-
+  eval(ref_path);
+  eval(tl_path);
 
 
   return 0;

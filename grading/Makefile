@@ -46,7 +46,7 @@ clean:
 clean-libs:
 	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) clean; )
 run: $(BIN)
-	$(BIN) 453 ../reference.so $(LIB_SOS)
+	$(BIN) -t ../reference.so -p $(LIB_SOS)
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile

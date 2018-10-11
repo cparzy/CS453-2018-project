@@ -8,14 +8,7 @@ EXT_CXX  := C cc cpp cxx c++
 INCLUDE_DIR := ../include
 SOURCE_DIR  := .
 
-# Path to LIBATOMIC_OPS (or to gcc-specific libatomic_ops)
-ifdef LIBAO_HOME
-  LIBAO_INC = $(LIBAO_HOME)/include
-else
-  LIBAO_INC = $(INCLUDE_DIR)/atomic_ops
-endif
-
-# include $(INCLUDE_DIR)/Makefile.common
+include $(INCLUDE_DIR)/Makefile.common
 
 WILD_EXT  = $(strip $(foreach EXT,$($(1)),$(wildcard $(2)/*.$(EXT))))
 

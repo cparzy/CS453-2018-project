@@ -771,7 +771,7 @@ public:
             } catch (Exception::TransactionRetry const&) {
                 continue;
             }
-        } while (false);
+        } while (true);
     }
 private:
     /** Long read-only transaction, summing the balance of each account.

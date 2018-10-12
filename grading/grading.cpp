@@ -464,7 +464,7 @@ public:
             if (unlikely(!tm.end(tx)))
                 continue;
             break;
-        } while (false);
+        } while (true);
     }
 private:
     /** Long transaction, summing the balance of each account.

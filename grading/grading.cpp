@@ -79,7 +79,7 @@ extern "C" {
 // -------------------------------------------------------------------------- //
 
 // Whether to enable more safety checks
-constexpr static auto assert_mode = true;
+constexpr static auto assert_mode = false;
 
 // -------------------------------------------------------------------------- //
 
@@ -115,13 +115,12 @@ EXCEPTION(Any, ::std::exception, "exception");
         EXCEPTION(TransactionBegin, Transaction, "transaction begin failed");
         EXCEPTION(TransactionAlloc, Transaction, "memory allocation failed (insufficient memory)");
         EXCEPTION(TransactionRetry, Transaction, "transaction aborted and can be retried");
+        EXCEPTION(TransactionNotLastSegment, Transaction, "trying to deallocate the first segment");
     EXCEPTION(Shared, Any, "operation in shared memory exception");
         EXCEPTION(SharedAlign, Shared, "address in shared memory is not properly aligned for the specified type");
         EXCEPTION(SharedOverflow, Shared, "index is past array length");
         EXCEPTION(SharedDoubleAlloc, Shared, "(probable) double allocation detected before transactional operation");
         EXCEPTION(SharedDoubleFree, Shared, "double free detected before transactional operation");
-    EXCEPTION(Assertion, Any, "an assertion was violated");
-        EXCEPTION(AssertionNotLastSegment, Assertion, "trying to deallocate first segment");
     EXCEPTION(TooSlow, Any, "non-reference module takes too long to process the transactions");
 
 #undef EXCEPTION
@@ -830,7 +829,7 @@ private:
                                 segment.parity = new_parity;
                             } else { // Deallocate segment
                                 if (unlikely(assert_mode && prev == nullptr))
-                                    throw Exception::AssertionNotLastSegment{};
+                                    throw Exception::TransactionNotLastSegment{};
                                 AccountSegment prev_segment{tx, prev};
                                 prev_segment.next.free();
                                 prev_segment.parity = prev_segment.parity.read() + new_parity;

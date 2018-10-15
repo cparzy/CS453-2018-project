@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <random>
@@ -1229,7 +1230,13 @@ int main(int argc, char** argv) {
                         ++reference;
                     return reference;
                 }(reference);
-                auto res     = measure(bank, nbworkers, nbrepeats, seed, maxtick);
+                decltype(measure(bank, nbworkers, nbrepeats, seed, maxtick)) res;
+                try {
+                    res = measure(bank, nbworkers, nbrepeats, seed, maxtick);
+                } catch (Exception::TooSlow const& err) { // Special case since interrupting threads may lead to corrupted state
+                    ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
+                    ::std::quick_exit(2);
+                }
                 auto correct = ::std::get<0>(res) && bank.check();
                 auto perf    = ::std::get<1>(res);
                 if (unlikely(!correct)) {
@@ -1242,9 +1249,6 @@ int main(int argc, char** argv) {
                     ::std::cout << "⎩ Average TX execution time: " << (perf / static_cast<double>(nbworkers) / static_cast<double>(nbtxperwrk)) << " ns" << ::std::endl;
                 }
                 return ::std::make_tuple(correct, perf);
-            } catch (Exception::TooSlow const& err) { // Special case since interrupting threads may lead to corrupted state
-                ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
-                ::std::exit(1);
             } catch (::std::exception const& err) {
                 ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
                 return ::std::make_tuple(false, 0.);

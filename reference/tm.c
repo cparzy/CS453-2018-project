@@ -34,6 +34,7 @@
 
 // External headers
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
@@ -85,6 +86,52 @@
 
 // -------------------------------------------------------------------------- //
 
+/** Compute a pointer to the parent structure.
+ * @param ptr    Member pointer
+ * @param type   Parent type
+ * @param member Member name
+ * @return Parent pointer
+**/
+#define objectof(ptr, type, member) \
+    ((type*) ((uintptr_t) ptr - offsetof(type, member)))
+
+struct link {
+    struct link* prev; // Previous link in the chain
+    struct link* next; // Next link in the chain
+};
+
+/** Link reset.
+ * @param link Link to reset
+**/
+static void link_reset(struct link* link) {
+    link->prev = link;
+    link->next = link;
+}
+
+/** Link insertion before a "base" link.
+ * @param link Link to insert
+ * @param base Base link relative to which 'link' will be inserted
+**/
+static void link_insert(struct link* link, struct link* base) {
+    struct link* prev = base->prev;
+    link->prev = prev;
+    link->next = base;
+    base->prev = link;
+    prev->next = link;
+}
+
+/** Link removal.
+ * @param link Link to remove
+**/
+static void link_remove(struct link* link) {
+    struct link* prev = link->prev;
+    struct link* next = link->next;
+    prev->next = next;
+    next->prev = prev;
+}
+
+// -------------------------------------------------------------------------- //
+
 #if defined(USE_TICKET_LOCK)
 struct lock_t {
     atomic_ulong pass; // Ticket that acquires the lock
@@ -99,6 +146,7 @@ struct lock_t {
 struct region {
     struct lock_t lock; // Global lock
     void* start;        // Start of the shared memory region
+    struct link allocs; // Allocated shared memory regions
     size_t size;        // Size of the shared memory region (in bytes)
     size_t align;       // Claimed alignment of the shared memory region (in bytes)
     size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
@@ -183,7 +231,7 @@ shared_t tm_create(size_t size, size_t align) {
     if (unlikely(!region)) {
         return invalid_shared;
     }
-    size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align;
+    size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align; // Also satisfy alignment requirement of 'struct link'
     if (unlikely(posix_memalign(&(region->start), align_alloc, size) != 0)) {
         free(region);
         return invalid_shared;
@@ -194,6 +242,7 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
     }
     memset(region->start, 0, size);
+    link_reset(&(region->allocs));
     region->size        = size;
     region->align       = align;
     region->align_alloc = align_alloc;
@@ -202,9 +251,17 @@ shared_t tm_create(size_t size, size_t align) {
 
 void tm_destroy(shared_t shared) {
     struct region* region = (struct region*) shared;
-    lock_cleanup(&(region->lock));
+    struct link* allocs = &(region->allocs);
+    while (true) { // Free allocated segments
+        struct link* alloc = allocs->next;
+        if (alloc == allocs)
+            break;
+        link_remove(alloc);
+        free(alloc);
+    }
     free(region->start);
     free(region);
+    lock_cleanup(&(region->lock));
 }
 
 void* tm_start(shared_t shared) {
@@ -241,13 +298,33 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 }
 
 alloc_t tm_alloc(shared_t shared, tx_t tx as(unused), size_t size, void** target) {
-    if (unlikely(posix_memalign(target, ((struct region*) shared)->align_alloc, size) != 0)) // Allocation failed
+    size_t align_alloc = ((struct region*) shared)->align_alloc;
+    size_t delta_alloc;
+    if (sizeof(struct link) >= align_alloc) {
+        delta_alloc = sizeof(struct link);
+    } else {
+        delta_alloc = align_alloc;
+    }
+    void* segment;
+    if (unlikely(posix_memalign(&segment, align_alloc, delta_alloc + size) != 0)) // Allocation failed
         return nomem_alloc;
-    memset(*target, 0, size);
+    link_insert((struct link*) segment, &(((struct region*) shared)->allocs));
+    segment = (void*) ((uintptr_t) segment + delta_alloc);
+    memset(segment, 0, size);
+    *target = segment;
     return success_alloc;
 }
 
-bool tm_free(shared_t shared as(unused), tx_t tx as(unused), void* target) {
-    free(target);
+bool tm_free(shared_t shared, tx_t tx as(unused), void* segment) {
+    size_t align_alloc = ((struct region*) shared)->align_alloc;
+    size_t delta_alloc;
+    if (sizeof(struct link) >= align_alloc) {
+        delta_alloc = sizeof(struct link);
+    } else {
+        delta_alloc = align_alloc;
+    }
+    segment = (void*) ((uintptr_t) segment - delta_alloc);
+    link_remove((struct link*) segment);
+    free(segment);
     return true;
 }

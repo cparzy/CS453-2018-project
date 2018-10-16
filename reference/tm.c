@@ -33,6 +33,7 @@
 #endif
 
 // External headers
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -132,16 +133,146 @@ static void link_remove(struct link* link) {
 
 // -------------------------------------------------------------------------- //
 
-#if defined(USE_TICKET_LOCK)
+/** Lock compile-time selection.
+**/
+// #define USE_PTHREAD_LOCK
+// #define USE_TICKET_LOCK
+
+/** Pause for a very short amount of time.
+**/
+static inline void pause() {
+#if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
+    _mm_pause();
+#else
+    sched_yield();
+#endif
+}
+
+#if defined(USE_PTHREAD_LOCK)
+
+struct lock_t {
+    pthread_mutex_t mutex;
+};
+
+/** Initialize the given lock.
+ * @param lock Lock to initialize
+ * @return Whether the operation is a success
+**/
+static bool lock_init(struct lock_t* lock) {
+    return pthread_mutex_init(&(lock->mutex), NULL) == 0;
+}
+
+/** Clean the given lock up.
+ * @param lock Lock to clean up
+**/
+static void lock_cleanup(struct lock_t* lock) {
+    pthread_mutex_destroy(&(lock->mutex));
+}
+
+/** Wait and acquire the given lock.
+ * @param lock Lock to acquire
+ * @return Whether the operation is a success
+**/
+static bool lock_acquire(struct lock_t* lock) {
+    return pthread_mutex_lock(&(lock->mutex)) == 0;
+}
+
+/** Release the given lock.
+ * @param lock Lock to release
+**/
+static void lock_release(struct lock_t* lock) {
+    pthread_mutex_unlock(&(lock->mutex));
+}
+
+#elif defined(USE_TICKET_LOCK)
+
 struct lock_t {
     atomic_ulong pass; // Ticket that acquires the lock
     atomic_ulong take; // Ticket the next thread takes
 };
-#else
+
+/** Initialize the given lock.
+ * @param lock Lock to initialize
+ * @return Whether the operation is a success
+**/
+static bool lock_init(struct lock_t* lock) {
+    atomic_init(&(lock->pass), 0ul);
+    atomic_init(&(lock->take), 0ul);
+    return true;
+}
+
+/** Clean the given lock up.
+ * @param lock Lock to clean up
+**/
+static void lock_cleanup(struct lock_t* lock as(unused)) {
+    return;
+}
+
+/** Wait and acquire the given lock.
+ * @param lock Lock to acquire
+ * @return Whether the operation is a success
+**/
+static bool lock_acquire(struct lock_t* lock) {
+    unsigned long ticket = atomic_fetch_add_explicit(&(lock->take), 1ul, memory_order_relaxed);
+    while (atomic_load_explicit(&(lock->pass), memory_order_relaxed) != ticket)
+        pause();
+    atomic_thread_fence(memory_order_acquire);
+    return true;
+}
+
+/** Release the given lock.
+ * @param lock Lock to release
+**/
+static void lock_release(struct lock_t* lock) {
+    atomic_fetch_add_explicit(&(lock->pass), 1, memory_order_release);
+}
+
+#else // Test-and-test-and-set
+
 struct lock_t {
     atomic_bool locked; // Whether the lock is taken
 };
+
+/** Initialize the given lock.
+ * @param lock Lock to initialize
+ * @return Whether the operation is a success
+**/
+static bool lock_init(struct lock_t* lock) {
+    atomic_init(&(lock->locked), false);
+    return true;
+}
+
+/** Clean the given lock up.
+ * @param lock Lock to clean up
+**/
+static void lock_cleanup(struct lock_t* lock as(unused)) {
+    return;
+}
+
+/** Wait and acquire the given lock.
+ * @param lock Lock to acquire
+ * @return Whether the operation is a success
+**/
+static bool lock_acquire(struct lock_t* lock) {
+    bool expected = false;
+    while (unlikely(!atomic_compare_exchange_weak_explicit(&(lock->locked), &expected, true, memory_order_acquire, memory_order_relaxed))) {
+        expected = false;
+        while (unlikely(atomic_load_explicit(&(lock->locked), memory_order_relaxed)))
+            pause();
+    }
+    return true;
+}
+
+/** Release the given lock.
+ * @param lock Lock to release
+**/
+static void lock_release(struct lock_t* lock) {
+    atomic_store_explicit(&(lock->locked), false, memory_order_release);
+}
+
 #endif
+
+// -------------------------------------------------------------------------- //
 
 struct region {
     struct lock_t lock; // Global lock
@@ -151,80 +282,6 @@ struct region {
     size_t align;       // Claimed alignment of the shared memory region (in bytes)
     size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
 };
-
-// -------------------------------------------------------------------------- //
-
-/** Pause for a very short amount of time.
-**/
-static void pause() {
-#if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
-    _mm_pause();
-#else
-    sched_yield();
-#endif
-}
-
-/** Initialize the given lock.
- * @param lock Lock to initialize
- * @return Whether the operation is a success
-**/
-static bool lock_init(struct lock_t* lock) {
-#if defined(USE_TICKET_LOCK)
-    atomic_init(&(lock->pass), 0ul);
-    atomic_init(&(lock->take), 0ul);
-    return true;
-#else
-    atomic_init(&(lock->locked), false);
-    return true;
-#endif
-}
-
-/** Clean the given lock up.
- * @param lock Lock to clean up
-**/
-static void lock_cleanup(struct lock_t* lock as(unused)) {
-#if defined(USE_TICKET_LOCK)
-    return;
-#else
-    return;
-#endif
-}
-
-/** Wait and acquire the given lock.
- * @param lock Lock to acquire
- * @return Whether the operation is a success
-**/
-static bool lock_acquire(struct lock_t* lock) {
-#if defined(USE_TICKET_LOCK)
-    unsigned long ticket = atomic_fetch_add_explicit(&(lock->take), 1ul, memory_order_relaxed);
-    while (atomic_load_explicit(&(lock->pass), memory_order_relaxed) != ticket)
-        pause();
-    atomic_thread_fence(memory_order_acquire);
-    return true;
-#else
-    bool expected = false;
-    while (unlikely(!atomic_compare_exchange_weak_explicit(&(lock->locked), &expected, true, memory_order_acquire, memory_order_relaxed))) {
-        expected = false;
-        while (unlikely(atomic_load_explicit(&(lock->locked), memory_order_relaxed)))
-            pause();
-    }
-    return true;
-#endif
-}
-
-/** Release the given lock.
- * @param lock Lock to acquire
- * @return Whether the operation is a success
-**/
-static void lock_release(struct lock_t* lock) {
-#if defined(USE_TICKET_LOCK)
-    atomic_fetch_add_explicit(&(lock->pass), 1, memory_order_release);
-#else
-    atomic_store_explicit(&(lock->locked), false, memory_order_release);
-#endif
-}
-
-// -------------------------------------------------------------------------- //
 
 shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));

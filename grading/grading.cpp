@@ -994,12 +994,6 @@ public:
     auto get_tick() const noexcept {
         return total;
     }
-    /** Get the total execution time.
-     * @return Total execution time (in ns)
-    **/
-    auto get_time() const noexcept {
-        return static_cast<double>(total) / static_cast<double>(convert(::clock_getres));
-    }
 };
 
 /** Pause execution.
@@ -1143,7 +1137,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
         }, i};
     }
     try {
-        decltype(::std::declval<Chrono>().get_time()) times[nbrepeats];
+        decltype(::std::declval<Chrono>().get_tick()) times[nbrepeats];
         bool res = true;
         for (unsigned int i = 0; i < nbrepeats; ++i) { // Repeat measurement
             Chrono chrono;
@@ -1154,7 +1148,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
                 goto join;
             }
             chrono.stop();
-            times[i] = chrono.get_time();
+            times[i] = chrono.get_tick();
         }
         ::std::nth_element(times, times + (nbrepeats >> 1), times + nbrepeats); // Partial-sort times around the median
         join: {
@@ -1198,7 +1192,7 @@ int main(int argc, char** argv) {
                 res = 16;
             return static_cast<size_t>(res);
         }();
-        auto const nbtxperwrk    = 50000ul;
+        auto const nbtxperwrk    = 400000ul / nbworkers;
         auto const nbaccounts    = 32 * nbworkers;
         auto const expnbaccounts = 1024 * nbworkers;
         auto const init_balance  = 100ul;
@@ -1238,7 +1232,7 @@ int main(int argc, char** argv) {
                     ::std::quick_exit(2);
                 }
                 auto correct = ::std::get<0>(res) && bank.check();
-                auto perf    = ::std::get<1>(res);
+                auto perf    = static_cast<double>(::std::get<1>(res));
                 if (unlikely(!correct)) {
                     ::std::cout << "⎩ Inconsistency detected!" << ::std::endl;
                 } else {

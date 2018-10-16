@@ -103,7 +103,7 @@ The student may write her/his library either in C11 (and above) or C++11 (and ab
 
 First iteration (deadline 2018/11/23 23:59:59):
 
-* `struct shared_t`
+* The structure of your _shared memory region_ (i.e. `struct region` in `reference/tm.c`)
 
 * `shared_t tm_create(size_t, size_t)`
 
@@ -115,7 +115,7 @@ First iteration (deadline 2018/11/23 23:59:59):
 
 * `size_t tm_align(shared_t)`
 
-* `tx_t tm_begin(shared_t)`
+* `tx_t tm_begin(shared_t, bool)`
 
 * `bool tm_end(shared_t, tx_t)`
 
@@ -252,17 +252,20 @@ Return the alignment (in bytes) of the memory accesses on given shared memory re
 
 Begin a new transaction on the given shared memory region.
 
-* `tx_t tm_begin(shared_t shared);`
+* `tx_t tm_begin(shared_t shared, bool is_ro);`
 
 | Parameter | Description |
 | :-------- | :---------- |
 | `shared` | Shared memory region to start a transaction on |
+| `is_ro` | Whether the transaction will be read-only |
 
 **Return:** Opaque transaction identifier, `invalid_tx` on failure
 
 > **NB:** this function can be called concurrently.
 
 > **NB:** there is no concept of nested transactions, i.e. one transaction started in another transaction.
+
+> **NB:** if `is_ro` is set to true, only `tm_read` can be called in the begun transaction.
 
 &nbsp;
 

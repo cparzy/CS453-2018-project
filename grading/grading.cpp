@@ -112,6 +112,7 @@ EXCEPTION(Any, ::std::exception, "exception");
         EXCEPTION(ModuleSymbol, Module, "symbol not found in loaded libraries");
     EXCEPTION(Transaction, Any, "transaction manager exception");
         EXCEPTION(TransactionAlign, Transaction, "incorrect alignment detected before transactional operation");
+        EXCEPTION(TransactionReadOnly, Transaction, "tried to write/alloc/free using a read-only transaction");
         EXCEPTION(TransactionCreate, Transaction, "shared memory region creation failed");
         EXCEPTION(TransactionBegin, Transaction, "transaction begin failed");
         EXCEPTION(TransactionAlloc, Transaction, "memory allocation failed (insufficient memory)");
@@ -289,10 +290,11 @@ public:
     }
 public:
     /** [thread-safe] Begin a new transaction on the shared memory region.
+     * @param ro Whether the transaction is read-only
      * @return Opaque transaction ID, 'STM::invalid_tx' on failure
     **/
-    auto begin() const noexcept {
-        return tl.tm_begin(shared);
+    auto begin(bool ro) const noexcept {
+        return tl.tm_begin(shared, ro);
     }
     /** [thread-safe] End the given transaction.
      * @param tx Opaque transaction ID
@@ -343,10 +345,15 @@ public:
 /** One transaction over a shared memory region management class.
 **/
 class Transaction final: private NonCopyable {
+public:
+    // Just to make explicit the meaning of the associated boolean
+    constexpr static auto read_write = false;
+    constexpr static auto read_only  = true;
 private:
     TransactionalMemory const& tm; // Bound transactional memory
     STM::tx_t tx; // Opaque transaction handle
     bool aborted; // Transaction was aborted
+    bool is_ro;   // Whether the transaction is read-only (solely for assertion)
 public:
     /** Deleted copy constructor/assignment.
     **/
@@ -354,8 +361,9 @@ public:
     Transaction& operator=(Transaction const&) = delete;
     /** Begin constructor.
      * @param tm Transactional memory to bind
+     * @param ro Whether the transaction is read-only
     **/
-    Transaction(TransactionalMemory const& tm): tm{tm}, tx{tm.begin()}, aborted{false} {
+    Transaction(TransactionalMemory const& tm, bool ro): tm{tm}, tx{tm.begin(ro)}, aborted{false}, is_ro{ro} {
         if (unlikely(tx == STM::invalid_tx))
             throw Exception::TransactionBegin{};
     }
@@ -390,6 +398,8 @@ public:
      * @param target Target start address
     **/
     void write(void const* source, size_t size, void* target) {
+        if (unlikely(assert_mode && is_ro))
+            throw Exception::TransactionReadOnly{};
         if (unlikely(!tm.write(tx, source, size, target))) {
             aborted = true;
             throw Exception::TransactionRetry{};
@@ -400,6 +410,8 @@ public:
      * @return Target start address
     **/
     void* alloc(size_t size) {
+        if (unlikely(assert_mode && is_ro))
+            throw Exception::TransactionReadOnly{};
         void* target;
         auto status = tm.alloc(tx, size, &target);
         if (unlikely(status == STM::nomem_alloc))
@@ -414,6 +426,8 @@ public:
      * @param target Target start address
     **/
     void free(void* target) {
+        if (unlikely(assert_mode && is_ro))
+            throw Exception::TransactionReadOnly{};
         if (unlikely(!tm.free(tx, target))) {
             aborted = true;
             throw Exception::TransactionRetry{};
@@ -770,7 +784,7 @@ public:
     Bank(TransactionalLibrary const& library, size_t nbtxperwrk, size_t nbaccounts, size_t expnbaccounts, Balance init_balance, float prob_long, float prob_alloc): Workload{library, AccountSegment::align(), AccountSegment::size(nbaccounts)}, nbtxperwrk{nbtxperwrk}, nbaccounts{nbaccounts}, expnbaccounts{expnbaccounts}, init_balance{init_balance}, prob_long{prob_long}, prob_alloc{prob_alloc} {
         do {
             try {
-                Transaction tx{tm};
+                Transaction tx{tm, Transaction::read_write};
                 AccountSegment segment{tx, tm.get_start()};
                 segment.count = nbaccounts;
                 for (size_t i = 0; i < nbaccounts; ++i)
@@ -792,7 +806,7 @@ private:
                 auto count = 0ul;
                 auto sum   = Balance{0};
                 auto start = tm.get_start();
-                Transaction tx{tm};
+                Transaction tx{tm, Transaction::read_only};
                 while (start) {
                     AccountSegment segment{tx, start};
                     decltype(count) segment_count = segment.count;
@@ -823,7 +837,7 @@ private:
                 auto count = 0ul;
                 auto start = tm.get_start();
                 void* prev = nullptr;
-                Transaction tx{tm};
+                Transaction tx{tm, Transaction::read_write};
                 while (true) {
                     AccountSegment segment{tx, start};
                     decltype(count) segment_count = segment.count;
@@ -872,7 +886,7 @@ private:
         do {
             try {
                 auto start = tm.get_start();
-                Transaction tx{tm};
+                Transaction tx{tm, Transaction::read_write};
                 void* send_ptr = nullptr;
                 void* recv_ptr = nullptr;
                 // Get the account pointers in shared memory
@@ -974,6 +988,13 @@ private:
         if (unlikely(res == invalid_tick)) // Bad luck...
             return invalid_tick + 1;
         return res;
+    }
+public:
+    /** Get the resolution of the clock used.
+     * @return Resolution (in ns), 'invalid_tick' for unknown
+    **/
+    static auto get_resolution() noexcept {
+        return convert(::clock_getres);
     }
 public:
     /** Start measuring a time segment.
@@ -1208,6 +1229,7 @@ int main(int argc, char** argv) {
         auto const prob_alloc    = dynamic ? 0.2f : 0.f;
         auto const nbrepeats     = 7;
         auto const seed          = static_cast<Seed>(::std::stoul(argv[1]));
+        auto const clk_res       = Chrono::get_resolution();
         auto const slow_factor   = 2ul;
         ::std::cout << "⎧ #worker threads:     " << nbworkers << ::std::endl;
         ::std::cout << "⎪ #TX per worker:      " << nbtxperwrk << ::std::endl;
@@ -1218,6 +1240,12 @@ int main(int argc, char** argv) {
         ::std::cout << "⎪ Long TX probability: " << prob_long << ::std::endl;
         ::std::cout << "⎪ Allocation TX prob.: " << prob_alloc << ::std::endl;
         ::std::cout << "⎪ Slow trigger factor: " << slow_factor << ::std::endl;
+        ::std::cout << "⎪ Clock resolution:    ";
+        if (unlikely(clk_res == Chrono::invalid_tick)) {
+            ::std::cout << "<unknown>" << ::std::endl;
+        } else {
+            ::std::cout << clk_res << " ns" << ::std::endl;
+        }
         ::std::cout << "⎩ Seed value:          " << seed << ::std::endl;
         auto&& eval = [&](char const* path, Chrono::Tick reference) { // Library evaluation
             try {

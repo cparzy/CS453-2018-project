@@ -378,38 +378,46 @@ public:
      * @param size   Source/target range
      * @param target Target start address
     **/
-    void read(void const* source, size_t size, void* target) const {
-        if (unlikely(!tm.read(tx, source, size, target)))
+    void read(void const* source, size_t size, void* target) {
+        if (unlikely(!tm.read(tx, source, size, target))) {
+            aborted = true;
             throw Exception::TransactionRetry{};
+        }
     }
     /** [thread-safe] Write operation in the bound transaction, source in a private region and target in the shared region.
      * @param source Source start address
      * @param size   Source/target range
      * @param target Target start address
     **/
-    void write(void const* source, size_t size, void* target) const {
-        if (unlikely(!tm.write(tx, source, size, target)))
+    void write(void const* source, size_t size, void* target) {
+        if (unlikely(!tm.write(tx, source, size, target))) {
+            aborted = true;
             throw Exception::TransactionRetry{};
+        }
     }
     /** [thread-safe] Memory allocation operation in the bound transaction, throw if no memory available.
      * @param size Size to allocate
      * @return Target start address
     **/
-    void* alloc(size_t size) const {
+    void* alloc(size_t size) {
         void* target;
         auto status = tm.alloc(tx, size, &target);
         if (unlikely(status == STM::nomem_alloc))
             throw Exception::TransactionAlloc{};
-        if (unlikely(status != STM::success_alloc))
+        if (unlikely(status != STM::success_alloc)) {
+            aborted = true;
             throw Exception::TransactionRetry{};
+        }
         return target;
     }
     /** [thread-safe] Memory freeing operation in the bound transaction.
      * @param target Target start address
     **/
-    void free(void* target) const {
-        if (unlikely(!tm.free(tx, target)))
+    void free(void* target) {
+        if (unlikely(!tm.free(tx, target))) {
+            aborted = true;
             throw Exception::TransactionRetry{};
+        }
     }
 };
 
@@ -418,14 +426,14 @@ public:
 **/
 template<class Type> class Shared {
 protected:
-    Transaction const& tx; // Bound transaction
+    Transaction& tx; // Bound transaction
     Type* address; // Address in shared memory
 public:
     /** Binding constructor.
      * @param tx      Bound transaction
      * @param address Address to bind to
     **/
-    Shared(Transaction const& tx, void* address): tx{tx}, address{reinterpret_cast<Type*>(address)} {
+    Shared(Transaction& tx, void* address): tx{tx}, address{reinterpret_cast<Type*>(address)} {
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % tx.get_tm().get_align() != 0))
             throw Exception::SharedAlign{};
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % alignof(Type) != 0))
@@ -469,14 +477,14 @@ public:
 };
 template<class Type> class Shared<Type*> {
 protected:
-    Transaction const& tx; // Bound transaction
+    Transaction& tx; // Bound transaction
     Type** address; // Address in shared memory
 public:
     /** Binding constructor.
      * @param tx      Bound transaction
      * @param address Address to bind to
     **/
-    Shared(Transaction const& tx, void* address): tx{tx}, address{reinterpret_cast<Type**>(address)} {
+    Shared(Transaction& tx, void* address): tx{tx}, address{reinterpret_cast<Type**>(address)} {
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % tx.get_tm().get_align() != 0))
             throw Exception::SharedAlign{};
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % alignof(Type*) != 0))
@@ -539,14 +547,14 @@ public:
 };
 template<class Type> class Shared<Type[]> {
 protected:
-    Transaction const& tx; // Bound transaction
+    Transaction& tx; // Bound transaction
     Type* address; // Address of the first element in shared memory
 public:
     /** Binding constructor.
      * @param tx      Bound transaction
      * @param address Address to bind to
     **/
-    Shared(Transaction const& tx, void* address): tx{tx}, address{reinterpret_cast<Type*>(address)} {
+    Shared(Transaction& tx, void* address): tx{tx}, address{reinterpret_cast<Type*>(address)} {
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % tx.get_tm().get_align() != 0))
             throw Exception::SharedAlign{};
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % alignof(Type) != 0))
@@ -594,14 +602,14 @@ public:
 };
 template<class Type, size_t n> class Shared<Type[n]> {
 protected:
-    Transaction const& tx; // Bound transaction
+    Transaction& tx; // Bound transaction
     Type* address; // Address of the first element in shared memory
 public:
     /** Binding constructor.
      * @param tx      Bound transaction
      * @param address Address to bind to
     **/
-    Shared(Transaction const& tx, void* address): tx{tx}, address{reinterpret_cast<Type*>(address)} {
+    Shared(Transaction& tx, void* address): tx{tx}, address{reinterpret_cast<Type*>(address)} {
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % tx.get_tm().get_align() != 0))
             throw Exception::SharedAlign{};
         if (unlikely(assert_mode && reinterpret_cast<uintptr_t>(address) % alignof(Type) != 0))
@@ -740,7 +748,7 @@ private:
          * @param tx      Associated pending transaction
          * @param address Block base address
         **/
-        AccountSegment(Transaction const& tx, void* address): count{tx, address}, next{tx, count.after()}, parity{tx, next.after()}, accounts{tx, parity.after()} {}
+        AccountSegment(Transaction& tx, void* address): count{tx, address}, next{tx, count.after()}, parity{tx, next.after()}, accounts{tx, parity.after()} {}
     };
 private:
     size_t  nbtxperwrk;    // Number of transactions per worker

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -46,9 +47,7 @@ extern "C" {
 
 // Internal headers
 namespace STM {
-extern "C" {
-#include <tm.h>
-}
+#include <tm.hpp>
 }
 
 // -------------------------------------------------------------------------- //
@@ -413,14 +412,15 @@ public:
         if (unlikely(assert_mode && is_ro))
             throw Exception::TransactionReadOnly{};
         void* target;
-        auto status = tm.alloc(tx, size, &target);
-        if (unlikely(status == STM::nomem_alloc))
+        switch (tm.alloc(tx, size, &target)) {
+        case STM::Alloc::success:
+            return target;
+        case STM::Alloc::nomem:
             throw Exception::TransactionAlloc{};
-        if (unlikely(status != STM::success_alloc)) {
+        default: // STM::Alloc::abort
             aborted = true;
             throw Exception::TransactionRetry{};
         }
-        return target;
     }
     /** [thread-safe] Memory freeing operation in the bound transaction.
      * @param target Target start address

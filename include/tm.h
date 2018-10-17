@@ -18,7 +18,7 @@
  *
  * @section DESCRIPTION
  *
- * Interface declaration for the transaction manager to use.
+ * Interface declaration for the transaction manager to use (C version).
  * YOU MUST NOT MODIFY THIS FILE.
 **/
 

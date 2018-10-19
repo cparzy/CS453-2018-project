@@ -19,6 +19,9 @@
 #include "getticks.h"
 #include "barrier.h"
 
+#include <atomic>
+#include <condition_variable>
+using namespace std::chrono_literals;
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -33,6 +36,8 @@ extern "C" {
     #include <xmmintrin.h>
 #endif
 }
+
+
 
 // Internal headers
 namespace TM {
@@ -488,12 +493,14 @@ public:
 #define DEFAULT_NB_THREADS              1
 #define DEFAULT_RANGE                   (2 * DEFAULT_INITIAL)
 #define DEFAULT_UPDATE                  20
+#define DEFAULT_WATCHDOG_TIMEOUT        60000 // in milliseconds
 
 #if !defined(UNUSED)
 #  define UNUSED __attribute__ ((unused))
 #endif
 
 static volatile int stop;
+static volatile int stop_watchdog;
 
 auto num_threads = []() {
     auto res = ::std::thread::hardware_concurrency();
@@ -511,7 +518,8 @@ size_t duration = DEFAULT_DURATION;
 
 volatile ticks *tx_count;
 
-
+std::mutex cv_m;
+std::condition_variable cv;
 barrier_t barrier, barrier_global;
 
 typedef struct thread_data
@@ -563,6 +571,21 @@ test(void* thread)
   pthread_exit(NULL);
 }
 
+void*
+watchdog(void* thread) {
+
+    auto timeout = DEFAULT_WATCHDOG_TIMEOUT * 1ms;
+    std::unique_lock<std::mutex> lk(cv_m);
+    cv.wait_for(lk, timeout, []{return stop_watchdog == 1;});
+
+    if (!stop_watchdog) {
+        printf("Timing out!\n");
+        exit(-1);
+    }
+
+    pthread_exit(NULL);
+} 
+
 double
 measure(Workload& workload) {
   struct timeval start, end;
@@ -572,6 +595,7 @@ measure(Workload& workload) {
 
   stop = 0;
   pthread_t threads[num_threads];
+  pthread_t watchdog_thread;
   pthread_attr_t attr;
   int rc;
   void *status;
@@ -584,6 +608,13 @@ measure(Workload& workload) {
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
   thread_data_t* tds = (thread_data_t*) malloc(num_threads * sizeof(thread_data_t));
 
+  // start watchdog thread
+  stop_watchdog = 0;
+  rc = pthread_create(&watchdog_thread, &attr, watchdog, NULL);
+  if (rc) {
+      printf("ERROR; return code from pthread_create() is %d\n", rc);
+      exit(-1);
+  }
   size_t t;
   for(t = 0; t < num_threads; t++)
   {
@@ -619,6 +650,15 @@ measure(Workload& workload) {
       exit(-1);
     }
   }
+
+    // stop watchdog thread
+    stop_watchdog = 1;
+    cv.notify_all();
+    rc = pthread_join(watchdog_thread, &status);
+    if (rc) {
+        printf("ERROR; return code from pthread_join() is %d\n", rc);
+        exit(-1);  
+    }
 
   free(tds);
   volatile uint64_t tx_count_total = 0;

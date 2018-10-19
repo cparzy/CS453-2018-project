@@ -45,7 +45,7 @@
 #endif
 #include <pthread.h>
 #include "utils.h"
-#include "atomic_ops.h"
+// #include "atomic_ops.h"
 
 typedef struct clh_qnode 
 {

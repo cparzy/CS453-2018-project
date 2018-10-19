@@ -661,7 +661,8 @@ measure(Workload& workload) {
 
 }
 
-void
+// returns median throughput
+double
 eval(char const* path) {
   TransactionalLibrary tl{path};
   Bank bank{tl, num_accounts, init_balance, prob_long};
@@ -671,7 +672,8 @@ eval(char const* path) {
     tputs[i] = measure(bank);
   }
   ::std::nth_element(tputs, tputs + (nbrepeats >> 1), tputs + nbrepeats); // Partial-sort times around the median
-  printf("Performance of %s: %.2f tx/s (median of %u runs)\n", path,tputs[nbrepeats >> 1], nbrepeats);
+  printf("Performance of %s: %.2f tx/s (median of %u runs)\n", path, tputs[nbrepeats >> 1], nbrepeats);
+  return tputs[nbrepeats >> 1];
 }
 
 int
@@ -770,8 +772,10 @@ main(int argc, char **argv) {
   tx_count = (ticks *) calloc(num_threads , sizeof(ticks));
 
 
-  eval(ref_path);
-  eval(tl_path);
+  double reference = eval(ref_path);
+  double target = eval(tl_path);
+
+  printf("Peformance ratio: %.2f\n", target/reference);
 
 
   return 0;

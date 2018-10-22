@@ -19,9 +19,9 @@ SRCS_CXX := $(call WILD_EXT,EXT_CXX,$(SOURCE_DIR))
 OBJS     := $(SRCS_C:%=%.o) $(SRCS_CXX:%=%.o)
 
 CC       := $(CC)
-CCFLAGS  := -Wall -Wextra -Wfatal-errors -O2 -std=c11 -I$(INCLUDE_DIR) $(CFLAGS)
+CCFLAGS  := -Wall -Wextra -Wfatal-errors -std=c11 -I$(INCLUDE_DIR) $(CFLAGS)
 CXX      := $(CXX)
-CXXFLAGS += -Wall -Wextra -Wfatal-errors -O2 -std=c++14 -I$(INCLUDE_DIR) $(CFLAGS)
+CXXFLAGS += -Wall -Wextra -Wfatal-errors -std=c++14 -I$(INCLUDE_DIR) $(CFLAGS)
 LD       := $(if $(SRCS_CXX),$(CXX),$(CC))
 LDFLAGS  +=
 LDLIBS   := -ldl -lpthread
@@ -39,7 +39,7 @@ clean:
 clean-libs:
 	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) clean; )
 run: $(BIN)
-	$(BIN) -t ../reference2.so -p $(LIB_SOS)
+	$(BIN) -t ../reference.so -p $(LIB_SOS)
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile

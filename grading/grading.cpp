@@ -24,9 +24,32 @@
 // Compile-time configuration
 // #define USE_MM_PAUSE
 
+#include <assert.h>
+#include <getopt.h>
+#include <limits.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <sched.h>
+#include <inttypes.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <malloc.h>
+#include "getticks.h"
+#include "barrier.h"
+
 // External headers
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+using namespace std::chrono_literals;
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -685,6 +708,14 @@ using Seed = ::std::uint_fast32_t;
 **/
 class Workload {
 protected:
+    /** Worker context base class.
+    **/
+    class ContextBase: private NonCopyable {};
+public:
+    /** Context class.
+    **/
+    using Context = ::std::unique_ptr<ContextBase>;
+protected:
     TransactionalLibrary const& tl;  // Associated transactional library
     TransactionalMemory         tm;  // Built transactional memory to use
 public:
@@ -702,11 +733,16 @@ public:
     **/
     virtual ~Workload() {};
 public:
-    /** [thread-safe] Worker full run.
-     * @param seed Seed to use
+    /** [thread-safe] Prepare one worker thread's context.
+     * @param Seed to use
+     * @return Context pointer
+    **/
+    virtual Context prepare(Seed) = 0;
+    /** [thread-safe] One transaction in one worker thread.
+     * @param Associated worker context
      * @return Whether no inconsistency has been (passively) detected
     **/
-    virtual bool run(Seed) const = 0;
+    virtual bool run(Seed, size_t) = 0;
     /** [thread-safe] Worker full run.
      * @return Whether no inconsistency has been detected
     **/
@@ -716,6 +752,26 @@ public:
 /** Bank workload class.
 **/
 class Bank final: public Workload {
+protected:
+    /** Bank worker context class.
+    **/
+    class BankContext: public ContextBase {
+    public:
+        ::std::minstd_rand engine;
+        ::std::bernoulli_distribution long_dist;
+        ::std::bernoulli_distribution alloc_dist;
+        ::std::uniform_int_distribution<size_t> account;
+        ::std::gamma_distribution<float> alloc_trigger;
+    public:
+        /** Defaulted move constructor/assignment.
+        **/
+        BankContext(BankContext&&) = default;
+        BankContext& operator=(BankContext&&) = default;
+        /** Parameter constructor.
+         * @param ... <to complete>
+        **/
+        BankContext(Seed seed, float prob_long, float prob_alloc, size_t nbaccounts, size_t  expnbaccounts): engine{seed}, long_dist{prob_long}, alloc_dist{prob_alloc}, account{0, nbaccounts - 1}, alloc_trigger{expnbaccounts, 1} {}
+    };
 public:
     /** Account balance class alias.
     **/
@@ -765,7 +821,6 @@ private:
         AccountSegment(Transaction& tx, void* address): count{tx, address}, next{tx, count.after()}, parity{tx, next.after()}, accounts{tx, parity.after()} {}
     };
 private:
-    size_t  nbtxperwrk;    // Number of transactions per worker
     size_t  nbaccounts;    // Initial number of accounts and number of accounts per segment
     size_t  expnbaccounts; // Expected total number of accounts
     Balance init_balance;  // Initial account balance
@@ -781,7 +836,7 @@ public:
      * @param prob_long     Probability of running a long, read-only control transaction
      * @param prob_alloc    Probability of running an allocation/deallocation transaction, knowing a long transaction won't run
     **/
-    Bank(TransactionalLibrary const& library, size_t nbtxperwrk, size_t nbaccounts, size_t expnbaccounts, Balance init_balance, float prob_long, float prob_alloc): Workload{library, AccountSegment::align(), AccountSegment::size(nbaccounts)}, nbtxperwrk{nbtxperwrk}, nbaccounts{nbaccounts}, expnbaccounts{expnbaccounts}, init_balance{init_balance}, prob_long{prob_long}, prob_alloc{prob_alloc} {
+    Bank(TransactionalLibrary const& library, size_t nbaccounts, size_t expnbaccounts, Balance init_balance, float prob_long, float prob_alloc): Workload{library, AccountSegment::align(), AccountSegment::size(nbaccounts)}, nbaccounts{nbaccounts}, expnbaccounts{expnbaccounts}, init_balance{init_balance}, prob_long{prob_long}, prob_alloc{prob_alloc} {
         do {
             try {
                 Transaction tx{tm, Transaction::read_write};
@@ -930,7 +985,10 @@ private:
         } while (true);
     }
 public:
-    virtual bool run(Seed seed) const {
+    virtual Context prepare(Seed seed) {
+        return ::std::make_unique<BankContext>(seed, prob_long, prob_alloc, nbaccounts, expnbaccounts);
+    }
+    virtual bool run(Seed seed, size_t nbtxperwrk) {
         ::std::minstd_rand engine{seed};
         ::std::bernoulli_distribution long_dist{prob_long};
         ::std::bernoulli_distribution alloc_dist{prob_alloc};
@@ -1024,16 +1082,6 @@ public:
         return total;
     }
 };
-
-/** Pause execution.
-**/
-static void pause() {
-#if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
-    _mm_pause();
-#else
-    ::std::this_thread::yield();
-#endif
-}
 
 /** Pause execution for a longer time.
 **/
@@ -1137,164 +1185,326 @@ public:
     }
 };
 
-/** Measure the arithmetic mean of the execution time of the given workload with the given transaction library.
- * @param workload  Workload instance to use
- * @param nbthreads Number of concurrent threads to use
- * @param nbrepeats Number of repetitions (keep the median)
- * @param seed      Seed to use
- * @param maxtick   Maximum number of ticks to wait before deeming a time-out
- * @return Whether no inconsistency have been *passively* detected, median execution time (in ns) (undefined if inconsistency detected)
-**/
-static auto measure(Workload& workload, unsigned int const nbthreads, unsigned int const nbrepeats, Seed seed, Chrono::Tick maxtick) {
-    ::std::thread threads[nbthreads];
-    Sync sync{nbthreads}; // "As-synchronized-as-possible" starts so that threads interfere "as-much-as-possible"
-    for (unsigned int i = 0; i < nbthreads; ++i) { // Start threads
-        threads[i] = ::std::thread{[&](unsigned int i) {
-            try {
-                size_t count = 0;
-                while (true) {
-                    if (!sync.worker_wait())
-                        return;
-                    sync.worker_notify(workload.run(seed + nbthreads * count + i));
-                    ++count;
-                }
-            } catch (::std::exception const& err) {
-                sync.worker_notify(false); // Exception in workload, since sync.* cannot throw
-                ::std::cerr << "⎧ *** EXCEPTION - worker thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
-                return;
-            }
-        }, i};
-    }
-    try {
-        decltype(::std::declval<Chrono>().get_tick()) times[nbrepeats];
-        bool res = true;
-        for (unsigned int i = 0; i < nbrepeats; ++i) { // Repeat measurement
-            Chrono chrono;
-            chrono.start();
-            sync.master_notify();
-            if (!sync.master_wait(maxtick)) {
-                res = false;
-                goto join;
-            }
-            chrono.stop();
-            times[i] = chrono.get_tick();
-        }
-        ::std::nth_element(times, times + (nbrepeats >> 1), times + nbrepeats); // Partial-sort times around the median
-        join: {
-            sync.master_join(); // Join with threads
-            for (unsigned int i = 0; i < nbthreads; ++i)
-                threads[i].join();
-        }
-        return ::std::make_tuple(res, times[nbrepeats >> 1]);
-    } catch (...) {
-        for (unsigned int i = 0; i < nbthreads; ++i) // Detach threads to avoid termination due to attached thread going out of scope
-            threads[i].detach();
-        throw;
-    }
+// NOTE: ASCYLIB-STYLE CODE BELOW
+
+// -------------------------------------------------------------------------- //
+
+#define DEFAULT_DURATION                1000
+#define DEFAULT_INITIAL                 1024
+#define DEFAULT_NB_THREADS              1
+#define DEFAULT_RANGE                   (2 * DEFAULT_INITIAL)
+#define DEFAULT_UPDATE                  20
+#define DEFAULT_WATCHDOG_TIMEOUT        60000 // in milliseconds
+
+#if !defined(UNUSED)
+#  define UNUSED __attribute__ ((unused))
+#endif
+
+static volatile int stop;
+static volatile int stop_watchdog;
+
+auto num_threads = []() {
+    auto res = ::std::thread::hardware_concurrency();
+    if (unlikely(res == 0))
+        res = 16;
+    return static_cast<size_t>(res);
+}();
+auto num_accounts  = 4   * num_threads;
+auto expnbaccounts = 1024 * num_threads;
+auto init_balance  = 100;
+auto prob_long     = 0.5f;
+auto prob_alloc    = 0.3f;
+auto nbrepeats     = 11;
+auto seed          = static_cast<Seed>(42);
+size_t duration    = DEFAULT_DURATION;
+
+
+volatile ticks *tx_count;
+
+std::mutex cv_m;
+std::condition_variable cv;
+barrier_t barrier, barrier_global;
+
+typedef struct thread_data
+{
+  uint32_t id;
+  Workload* workload;
+  Seed seed;
+} thread_data_t;
+
+
+void*
+test(void* thread) 
+{
+  thread_data_t* td = (thread_data_t*) thread;
+  uint32_t ID = td->id;
+  Workload* workload = td->workload;
+  Seed seed = td->seed;
+
+  uint64_t my_tx_count = 0;
+
+  // barrier before initialization
+  barrier_cross(&barrier);
+
+  // auto context = workload->prepare(seed);
+
+  // barrier after initialization
+  // barrier_cross(&barrier);
+
+  // barrier before actual measured run
+  barrier_cross(&barrier_global);
+
+  bool res;
+  // while (stop == 0) {
+  //   res = workload->run(context);
+  //   if (likely(res)) {
+  //     my_tx_count++;
+  //   } else {
+  //     my_tx_count = UINT64_MAX;
+  //     break;
+  //   }
+  // }
+
+  workload->run(seed, 1000);
+
+  barrier_cross(&barrier_global);
+
+  tx_count[ID] = my_tx_count;
+
+  pthread_exit(NULL);
 }
 
-/** Program entry point.
- * @param argc Arguments count
- * @param argv Arguments values
- * @return Program return code
-**/
-int main(int argc, char** argv) {
-    try {
-        if (argc < 3) {
-            ::std::cout << "Usage: " << (argc > 0 ? argv[0] : "grading") << " [--dynamic] <seed> <reference library path> <tested library path>..." << ::std::endl;
-            return 1;
-        }
-        bool dynamic; // Use dynamic memory allocation
-        if (::std::strcmp(argv[1], "--dynamic") == 0) {
-            dynamic = true;
-            { // Pop the argument
-                argv[1] = argv[0];
-                --argc;
-                ++argv;
-            }
-        } else {
-            dynamic = false;
-        }
-        auto const nbworkers = []() {
-            auto res = ::std::thread::hardware_concurrency();
-            if (unlikely(res == 0))
-                res = 16;
-            return static_cast<size_t>(res);
-        }();
-        auto const nbtxperwrk    = 400000ul / nbworkers;
-        auto const nbaccounts    = 32 * nbworkers;
-        auto const expnbaccounts = 1024 * nbworkers;
-        auto const init_balance  = 100ul;
-        auto const prob_long     = dynamic ? 0.05f : 0.5f;
-        auto const prob_alloc    = dynamic ? 0.2f : 0.f;
-        auto const nbrepeats     = 7;
-        auto const seed          = static_cast<Seed>(::std::stoul(argv[1]));
-        auto const clk_res       = Chrono::get_resolution();
-        auto const slow_factor   = 2ul;
-        ::std::cout << "⎧ #worker threads:     " << nbworkers << ::std::endl;
-        ::std::cout << "⎪ #TX per worker:      " << nbtxperwrk << ::std::endl;
-        ::std::cout << "⎪ #repetitions:        " << nbrepeats << ::std::endl;
-        ::std::cout << "⎪ Initial #accounts:   " << nbaccounts << ::std::endl;
-        ::std::cout << "⎪ Expected #accounts:  " << expnbaccounts << ::std::endl;
-        ::std::cout << "⎪ Initial balance:     " << init_balance << ::std::endl;
-        ::std::cout << "⎪ Long TX probability: " << prob_long << ::std::endl;
-        ::std::cout << "⎪ Allocation TX prob.: " << prob_alloc << ::std::endl;
-        ::std::cout << "⎪ Slow trigger factor: " << slow_factor << ::std::endl;
-        ::std::cout << "⎪ Clock resolution:    ";
-        if (unlikely(clk_res == Chrono::invalid_tick)) {
-            ::std::cout << "<unknown>" << ::std::endl;
-        } else {
-            ::std::cout << clk_res << " ns" << ::std::endl;
-        }
-        ::std::cout << "⎩ Seed value:          " << seed << ::std::endl;
-        auto&& eval = [&](char const* path, Chrono::Tick reference) { // Library evaluation
-            try {
-                ::std::cout << "⎧ Evaluating '" << path << "'" << (reference == Chrono::invalid_tick ? " (reference)" : "") << "..." << ::std::endl;
-                TransactionalLibrary tl{path};
-                Bank bank{tl, nbtxperwrk, nbaccounts, expnbaccounts, init_balance, prob_long, prob_alloc};
-                auto maxtick = [](auto reference) {
-                    if (reference == Chrono::invalid_tick)
-                        return Chrono::invalid_tick;
-                    reference *= slow_factor;
-                    if (unlikely(reference == Chrono::invalid_tick)) // Bad luck...
-                        ++reference;
-                    return reference;
-                }(reference);
-                decltype(measure(bank, nbworkers, nbrepeats, seed, maxtick)) res;
-                try {
-                    res = measure(bank, nbworkers, nbrepeats, seed, maxtick);
-                } catch (Exception::TooSlow const& err) { // Special case since interrupting threads may lead to corrupted state
-                    ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
-                    ::std::quick_exit(2);
-                }
-                auto correct = ::std::get<0>(res) && bank.check();
-                auto perf    = static_cast<double>(::std::get<1>(res));
-                if (unlikely(!correct)) {
-                    ::std::cout << "⎩ Inconsistency detected!" << ::std::endl;
-                } else {
-                    ::std::cout << "⎪ Total user execution time: " << (perf / 1000000.) << " ms";
-                    if (reference != Chrono::invalid_tick)
-                        ::std::cout << " -> " << (static_cast<double>(reference) / perf) << " speedup";
-                    ::std::cout << ::std::endl;
-                    ::std::cout << "⎩ Average TX execution time: " << (perf / static_cast<double>(nbworkers) / static_cast<double>(nbtxperwrk)) << " ns" << ::std::endl;
-                }
-                return ::std::make_tuple(correct, perf);
-            } catch (::std::exception const& err) {
-                ::std::cerr << "⎪ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
-                return ::std::make_tuple(false, 0.);
-            }
-        };
-        { // Evaluations
-            auto reference = eval(argv[2], Chrono::invalid_tick);
-            if (unlikely(!::std::get<0>(reference)))
-                return 1;
-            auto perf_ref = ::std::get<1>(reference);
-            for (auto i = 3; i < argc; ++i)
-                eval(argv[i], perf_ref);
-        }
-        return 0;
-    } catch (::std::exception const& err) {
-        ::std::cerr << "⎧ *** EXCEPTION - main thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
-        return 1;
+void*
+watchdog(void* thread) {
+
+    auto timeout = DEFAULT_WATCHDOG_TIMEOUT * 1ms;
+    std::unique_lock<std::mutex> lk(cv_m);
+    cv.wait_for(lk, timeout, []{return stop_watchdog == 1;});
+
+    if (!stop_watchdog) {
+        printf("Timing out!\n");
+        exit(-1);
     }
+
+    pthread_exit(NULL);
+} 
+
+double
+measure(Workload& workload) {
+  struct timeval start, end;
+  struct timespec timeout;
+  timeout.tv_sec = duration / 1000;
+  timeout.tv_nsec = (duration % 1000) * 1000000;
+
+  stop = 0;
+  pthread_t threads[num_threads];
+  pthread_t watchdog_thread;
+  pthread_attr_t attr;
+  int rc;
+  void *status;
+
+  barrier_init(&barrier_global, num_threads + 1);
+  barrier_init(&barrier, num_threads);
+
+  /* Initialize and set thread detached attribute */
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+  thread_data_t* tds = (thread_data_t*) malloc(num_threads * sizeof(thread_data_t));
+
+  // start watchdog thread
+  stop_watchdog = 0;
+  rc = pthread_create(&watchdog_thread, &attr, watchdog, NULL);
+  if (rc) {
+      printf("ERROR; return code from pthread_create() is %d\n", rc);
+      exit(-1);
+  }
+  size_t t;
+  for(t = 0; t < num_threads; t++)
+  {
+    tds[t].id = t;
+    tds[t].workload = &workload;
+    tds[t].seed = seed;
+    rc = pthread_create(&threads[t], &attr, test, tds + t);
+    if (rc)
+    {
+      printf("ERROR; return code from pthread_create() is %d\n", rc);
+      exit(-1);
+    }
+
+  }
+
+  /* Free attribute and wait for the other threads */
+  pthread_attr_destroy(&attr);
+
+  barrier_cross(&barrier_global);
+  gettimeofday(&start, NULL);
+  // nanosleep(&timeout, NULL);
+  // stop = 1;
+  barrier_cross(&barrier_global);
+  gettimeofday(&end, NULL);
+
+  duration = (end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec);
+
+  for(t = 0; t < num_threads; t++) {
+    rc = pthread_join(threads[t], &status);
+    if (rc) {
+      printf("ERROR; return code from pthread_join() is %d\n", rc);
+      exit(-1);
+    }
+  }
+
+    // stop watchdog thread
+    stop_watchdog = 1;
+    cv.notify_all();
+    rc = pthread_join(watchdog_thread, &status);
+    if (rc) {
+        printf("ERROR; return code from pthread_join() is %d\n", rc);
+        exit(-1);  
+    }
+
+  free(tds);
+  volatile uint64_t tx_count_total = 0;
+
+  for(t=0; t < num_threads; t++) 
+  {
+    if (tx_count[t] != UINT64_MAX) {
+      tx_count_total += tx_count[t];
+    } else {
+      printf("INCONCISTENCY DETECTED!\n");
+      exit(-1);
+    }
+
+  }
+
+#define LLU long long unsigned int
+
+  // int UNUSED pr = (int) (putting_count_total_succ - removing_count_total_succ);
+
+  // printf("    : %-10s | %-10s | %-11s | %-11s | %s\n", "total", "success", "succ %", "total %", "effective %");
+  // uint64_t total = putting_count_total + getting_count_total + removing_count_total;
+  // double putting_perc = 100.0 * (1 - ((double)(total - putting_count_total) / total));
+  // double putting_perc_succ = (1 - (double) (putting_count_total - putting_count_total_succ) / putting_count_total) * 100;
+  // double getting_perc = 100.0 * (1 - ((double)(total - getting_count_total) / total));
+  // double getting_perc_succ = (1 - (double) (getting_count_total - getting_count_total_succ) / getting_count_total) * 100;
+  // double removing_perc = 100.0 * (1 - ((double)(total - removing_count_total) / total));
+  // double removing_perc_succ = (1 - (double) (removing_count_total - removing_count_total_succ) / removing_count_total) * 100;
+  // printf("srch: %-10llu | %-10llu | %10.1f%% | %10.1f%% | \n", (LLU) getting_count_total, 
+  //  (LLU) getting_count_total_succ,  getting_perc_succ, getting_perc);
+  // printf("insr: %-10llu | %-10llu | %10.1f%% | %10.1f%% | %10.1f%%\n", (LLU) putting_count_total, 
+  //  (LLU) putting_count_total_succ, putting_perc_succ, putting_perc, (putting_perc * putting_perc_succ) / 100);
+  // printf("rems: %-10llu | %-10llu | %10.1f%% | %10.1f%% | %10.1f%%\n", (LLU) removing_count_total, 
+  //  (LLU) removing_count_total_succ, removing_perc_succ, removing_perc, (removing_perc * removing_perc_succ) / 100);
+
+  double throughput = (tx_count_total) * 1000.0 / duration;
+  printf("#txs %zu\t(%zu us\n", num_threads, duration);
+  // printf("#Mops %.3f\n", throughput / 1e6);  
+
+  return throughput;
+
 }
+
+// returns median throughput
+void
+eval(char const* path) {
+  TransactionalLibrary tl{path};
+  Bank bank{tl, num_accounts, expnbaccounts, init_balance, prob_long, prob_alloc};
+
+  measure(bank);
+}
+
+int
+main(int argc, char **argv) {
+
+  struct option long_options[] = {
+    // These options don't set a flag
+    {"help",                      no_argument,       NULL, 'h'},
+    {"verbose",                   no_argument,       NULL, 'e'},
+    {"duration",                  required_argument, NULL, 'd'},
+    {"initial-size",              required_argument, NULL, 'i'},
+    {"num-threads",               required_argument, NULL, 'n'},
+    {"range",                     required_argument, NULL, 'r'},
+    {"update-rate",               required_argument, NULL, 'u'},
+    {"num-buckets",               required_argument, NULL, 'b'},
+    {"print-vals",                required_argument, NULL, 'v'},
+    {"vals-pf",                   required_argument, NULL, 'f'},
+    {NULL, 0, NULL, 0}
+  };
+
+  int i, c;
+  char *tl_path, *ref_path;
+  while(1) 
+  {
+    i = 0;
+    c = getopt_long(argc, argv, "hAf:d:i:n:r:s:t:m:l:p:v:f:x:", long_options, &i);
+
+    if(c == -1)
+      break;
+
+    if(c == 0 && long_options[i].flag == 0)
+      c = long_options[i].val;
+
+    switch(c) 
+    {
+      case 0:
+      /* Flag is automatically set */
+      break;
+      case 'h':
+      printf("ASCYLIB -- stress test "
+       "\n"
+       "\n"
+       "Usage:\n"
+       "  %s [options...]\n"
+       "\n"
+       "Options:\n"
+       "  -h, --help\n"
+       "        Print this message\n"
+       "  -e, --verbose\n"
+       "        Be verbose\n"
+       "  -d, --duration <int>\n"
+       "        Test duration in milliseconds\n"
+       "  -i, --initial-size <int>\n"
+       "        Number of elements to insert before test\n"
+       "  -n, --num-threads <int>\n"
+       "        Number of threads\n"
+       "  -r, --range <int>\n"
+       "        Range of integer values inserted in set\n"
+       "  -u, --update-rate <int>\n"
+       "        Percentage of update transactions\n"
+       "  -p, --put-rate <int>\n"
+       "        Percentage of put update transactions (should be less than percentage of updates)\n"
+       , argv[0]);
+      exit(0);
+      case 'd':
+        duration = atoi(optarg);
+        break;
+      case 's':
+        seed = static_cast<Seed>(::std::stoul(optarg));
+        break;
+      case 'n':
+        num_threads = atoi(optarg);
+        break;
+      case 'r':
+        nbrepeats = atol(optarg);
+        break;
+      case 't':
+        tl_path = optarg;
+        break;
+      case '?':
+      default:
+      printf("Use -h or --help for help\n");
+      exit(1);
+    }
+  }
+
+  num_accounts = 4 * num_threads;
+
+
+
+  /* Initializes the local data */
+  tx_count = (ticks *) calloc(num_threads , sizeof(ticks));
+
+  eval(tl_path);
+
+  return 0;
+}
+

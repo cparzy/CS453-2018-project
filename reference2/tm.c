@@ -139,7 +139,7 @@ size_t tm_align(shared_t shared) {
     return ((struct region*) shared)->align;
 }
 
-tx_t tm_begin(shared_t shared) {
+tx_t tm_begin(shared_t shared, bool is_ro as(unused)) {
     LOCK(&(((struct region*) shared)->lock));
     return invalid_tx + 1; // There can be only one transaction running => ID is useless
 }

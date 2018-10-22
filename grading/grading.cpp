@@ -1194,7 +1194,7 @@ public:
 #define DEFAULT_NB_THREADS              1
 #define DEFAULT_RANGE                   (2 * DEFAULT_INITIAL)
 #define DEFAULT_UPDATE                  20
-#define DEFAULT_WATCHDOG_TIMEOUT        60000 // in milliseconds
+#define DEFAULT_WATCHDOG_TIMEOUT        300000 // in milliseconds
 
 #if !defined(UNUSED)
 #  define UNUSED __attribute__ ((unused))
@@ -1214,7 +1214,7 @@ auto expnbaccounts = 1024 * num_threads;
 auto init_balance  = 100;
 auto prob_long     = 0.5f;
 auto prob_alloc    = 0.3f;
-auto nbrepeats     = 11;
+auto nbtxperwrk    = 10000;
 auto seed          = static_cast<Seed>(42);
 size_t duration    = DEFAULT_DURATION;
 
@@ -1435,7 +1435,7 @@ main(int argc, char **argv) {
   while(1) 
   {
     i = 0;
-    c = getopt_long(argc, argv, "hAf:d:i:n:r:s:t:m:l:p:v:f:x:", long_options, &i);
+    c = getopt_long(argc, argv, "hAf:a:s:x:n:t:b:l:p:", long_options, &i);
 
     if(c == -1)
       break;
@@ -1474,20 +1474,29 @@ main(int argc, char **argv) {
        "        Percentage of put update transactions (should be less than percentage of updates)\n"
        , argv[0]);
       exit(0);
-      case 'd':
-        duration = atoi(optarg);
+      case 'a':
+        num_accounts = atoi(optarg);
         break;
       case 's':
         seed = static_cast<Seed>(::std::stoul(optarg));
         break;
+      case 'x':
+        nbtxperwrk = atoi(optarg);
+        break;
       case 'n':
         num_threads = atoi(optarg);
         break;
-      case 'r':
-        nbrepeats = atol(optarg);
-        break;
       case 't':
         tl_path = optarg;
+        break;
+      case 'b':
+        init_balance = atoi(optarg);
+        break;
+      case 'l':
+        prob_long = atof(optarg);
+        break;
+      case 'p':
+        prob_alloc = atof(optarg);
         break;
       case '?':
       default:
@@ -1495,10 +1504,6 @@ main(int argc, char **argv) {
       exit(1);
     }
   }
-
-  num_accounts = 4 * num_threads;
-
-
 
   /* Initializes the local data */
   tx_count = (ticks *) calloc(num_threads , sizeof(ticks));

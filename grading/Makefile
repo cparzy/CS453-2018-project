@@ -39,7 +39,7 @@ clean:
 clean-libs:
 	@$(foreach DIR,$(LIB_DIRS),make -C $(DIR) clean; )
 run: $(BIN)
-	$(BIN) -t ../reference.so -p $(LIB_SOS)
+	python3 run.py $(BIN) ../reference.so $(LIB_SOS) 11
 
 define BUILD_C
 %.$(1).o: %.$(1) $$(HDRS_C) Makefile

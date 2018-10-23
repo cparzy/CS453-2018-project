@@ -317,8 +317,8 @@ void tm_destroy(shared_t shared) {
         free(alloc);
     }
     free(region->start);
-    free(region);
     lock_cleanup(&(region->lock));
+    free(region);
 }
 
 void* tm_start(shared_t shared) {

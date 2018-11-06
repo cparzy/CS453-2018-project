@@ -368,9 +368,11 @@ public:
     }
     /** End destructor.
     **/
-    ~Transaction() {
-        if (likely(!aborted))
-            tm.end(tx);
+    ~Transaction() noexcept(false) {
+        if (likely(!aborted)) {
+            if (unlikely(!tm.end(tx)))
+                throw Exception::TransactionRetry{};
+        }
     }
 public:
     /** [thread-safe] Return the bound transactional memory instance.

@@ -350,9 +350,8 @@ static void lock_release_shared(struct lock_t* lock) {
 
 // -------------------------------------------------------------------------- //
 
-static const tx_t read_only_tx = UINTPTR_MAX-10;
-static const tx_t read_write_tx = UINTPTR_MAX-11;
-
+static const tx_t read_only_tx  = UINTPTR_MAX - 10;
+static const tx_t read_write_tx = UINTPTR_MAX - 11;
 
 struct region {
     struct lock_t lock; // Global lock
@@ -361,6 +360,7 @@ struct region {
     size_t size;        // Size of the shared memory region (in bytes)
     size_t align;       // Claimed alignment of the shared memory region (in bytes)
     size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
+    size_t delta_alloc; // Space to add at the beginning of the segment for the link chain (in bytes)
 };
 
 shared_t tm_create(size_t size, size_t align) {
@@ -383,6 +383,7 @@ shared_t tm_create(size_t size, size_t align) {
     region->size        = size;
     region->align       = align;
     region->align_alloc = align_alloc;
+    region->delta_alloc = (sizeof(struct link) + align_alloc - 1) / align_alloc * align_alloc;
     return region;
 }
 
@@ -417,20 +418,18 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
     if (is_ro) {
         if (unlikely(!lock_acquire_shared(&(((struct region*) shared)->lock))))
             return invalid_tx;
-        return read_only_tx; 
+        return read_only_tx;
     } else {
         if (unlikely(!lock_acquire(&(((struct region*) shared)->lock))))
             return invalid_tx;
-        return read_write_tx; 
+        return read_write_tx;
     }
 }
 
 bool tm_end(shared_t shared, tx_t tx) {
-    if (tx == read_only_tx) { // read-only
-
+    if (tx == read_only_tx) {
         lock_release_shared(&(((struct region*) shared)->lock));
-    } else { // read-write
-
+    } else {
         lock_release(&(((struct region*) shared)->lock));
     }
     return true;
@@ -448,12 +447,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 
 alloc_t tm_alloc(shared_t shared, tx_t tx as(unused), size_t size, void** target) {
     size_t align_alloc = ((struct region*) shared)->align_alloc;
-    size_t delta_alloc;
-    if (sizeof(struct link) >= align_alloc) {
-        delta_alloc = sizeof(struct link);
-    } else {
-        delta_alloc = align_alloc;
-    }
+    size_t delta_alloc = ((struct region*) shared)->delta_alloc;
     void* segment;
     if (unlikely(posix_memalign(&segment, align_alloc, delta_alloc + size) != 0)) // Allocation failed
         return nomem_alloc;
@@ -465,13 +459,7 @@ alloc_t tm_alloc(shared_t shared, tx_t tx as(unused), size_t size, void** target
 }
 
 bool tm_free(shared_t shared, tx_t tx as(unused), void* segment) {
-    size_t align_alloc = ((struct region*) shared)->align_alloc;
-    size_t delta_alloc;
-    if (sizeof(struct link) >= align_alloc) {
-        delta_alloc = sizeof(struct link);
-    } else {
-        delta_alloc = align_alloc;
-    }
+    size_t delta_alloc = ((struct region*) shared)->delta_alloc;
     segment = (void*) ((uintptr_t) segment - delta_alloc);
     link_remove((struct link*) segment);
     free(segment);

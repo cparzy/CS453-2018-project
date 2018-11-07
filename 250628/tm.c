@@ -241,6 +241,9 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
+    if (((struct transaction*)tx)->is_ro) {
+        return true;
+    }
     return tm_validate(shared, tx);
 }
 

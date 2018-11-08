@@ -247,6 +247,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
     size_t number_of_items = get_nb_items(size, alignment);
+    printf("number_of_items: %zu\n", number_of_items);
     shared_memory_state* memory_state = (shared_memory_state*) calloc(number_of_items, sizeof(shared_memory_state));
     if (unlikely(!memory_state)) {
         printf("unlikely(!memory_state) returned true\n");
@@ -258,6 +259,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
         memory_state[i].written = false;
         memory_state[i].new_val = NULL;
     }
+    transaction->memory_state = memory_state;
     printf("return from tm_begin: %p\n", (void*)trans);
     return (tx_t)trans;
 }
@@ -409,8 +411,10 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     printf("tm_write, going from %zu, to %zu\n", start_index, start_index + number_of_items);
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
         printf("tm_write, current_trgt_slot: %p\n", current_trgt_slot);
+        printf("tm_write, tx->memory_state: %p\n", (void*)((struct transaction*)tx)->memory_state)
         shared_memory_state memory_state = ((struct transaction*)tx)->memory_state[i];
         if (memory_state.written) {
+            printf("tm_written, written == true\n");
             memcpy(memory_state.new_val, current_trgt_slot, alignment);
         } else {
             void* local_content = (void*) malloc(alignment);

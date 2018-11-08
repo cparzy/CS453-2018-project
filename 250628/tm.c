@@ -129,7 +129,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // Allocate the region
     struct region* region = (struct region*) malloc(sizeof(struct region));
     if (unlikely(!region)) { // means that the proposition: !region is likely false
-        printf("unlikely(!region) returned true...");
+        printf("unlikely(!region) returned true...\n");
         return invalid_shared;
     }
 
@@ -137,7 +137,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // Also satisfy alignment requirement of 'struct link'
     size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align;
 
-    printf("align_alloc: %zu", align_alloc);
+    printf("align_alloc: %zu\n", align_alloc);
 
     // Allocate the first segment of the region
     if (unlikely(posix_memalign(&(region->start), align_alloc, size) != 0)) {
@@ -151,6 +151,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // Fill the first segment of the region with 0s
     printf("Fill the first segment of the region with 0s\n");
     memset(region->start, 0, size);
+    printf("tm_create, start: %p\n", region->start);
 
     atomic_init(&(region->size), size);
     atomic_init(&(region->align), align);
@@ -210,7 +211,7 @@ size_t tm_size(shared_t shared as(unused)) {
     // TODO: may have to cast to size_t
     printf("In tm_size\n");
     size_t size = atomic_load(&(((struct region*)shared)->size));
-    printf("return from tm_size\n");
+    printf("return from tm_size: %zu\n", size);
     return size;
 }
 
@@ -221,7 +222,7 @@ size_t tm_size(shared_t shared as(unused)) {
 size_t tm_align(shared_t shared as(unused)) {
     printf("in tm_align\n");
     size_t align = atomic_load(&(((struct region*)shared)->align));
-    printf("return from tm_align\n");
+    printf("return from tm_align: %zu\n", align);
     return align;
 }
 
@@ -234,7 +235,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
     printf("in tm_begin\n");
     // TODO: tm_begin(shared_t)
     int rv = atomic_load(&(((struct region*)shared)->VClock));
-    printf("After loading rv\n");
+    printf("After loading rv: %d\n", rv);
     struct transaction* trans = (struct transaction*) malloc(sizeof(struct transaction));
     if (unlikely(!trans)) { // means that the proposition: !region is likely false
         printf("unlikely(!trans) returned true\n");
@@ -257,7 +258,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
         memory_state[i].written = false;
         memory_state[i].new_val = NULL;
     }
-    printf("return from tm_begin\n");
+    printf("return from tm_begin: %p\n", (void*)trans);
     return (tx_t)trans;
 }
 
@@ -267,7 +268,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
-    printf("In tm_end");
+    printf("In tm_end\n");
     if (((struct transaction*)tx)->is_ro) {
         printf("tm_end read-only\n");
         return true;
@@ -291,8 +292,10 @@ size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused
         printf("shared == NULL || mem_ptr == NULL\n");
     }
     size_t alignment = tm_align(shared);
-    size_t start_index = (mem_ptr - tm_start(shared)) / alignment;
-    printf("return from get_start_index\n");
+    void* start = tm_start(shared);
+    printf("get_start_index, start: %p, mem_ptr: %p, alignment: %zu\n", start, mem_ptr, alignment);
+    size_t start_index = (mem_ptr - start) / alignment;
+    printf("return from get_start_index: %zu\n", start_index);
     return start_index;
 }
 
@@ -301,7 +304,9 @@ size_t get_nb_items(size_t size, size_t alignment) {
     if (alignment == 0) {
         printf("get_nb_items, alignment == 0\n");
     }
-    return size / alignment;
+    size_t nb_items = size / alignment;
+    printf("returns from get_nb_items: %zu\n", nb_items);
+    return nb_items;
 }
 
 bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items) {
@@ -337,17 +342,17 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
-    printf("in tm_read: %p\n", (void*)tx);
+    printf("in tm_read: %p, size: %zu\n", (void*)tx, size);
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         printf("tm_read, size modulo alignment != 0\n");
         return false;
     }
     size_t start_index = get_start_index(shared, source);
-    printf("tm_write, start_index: %zu\n", start_index);
+    printf("tm_read, start_index: %zu\n", start_index);
     // number of items we want to read
     size_t number_of_items = get_nb_items(size, alignment);
-    printf("tm_write, number_of_items: %zu\n", number_of_items);
+    printf("tm_read, number_of_items: %zu\n", number_of_items);
     const void* current_src_slot = source;
     void* current_trgt_slot = target;
     printf("tm_read, going from %zu, to %zu\n", start_index, start_index + number_of_items);
@@ -389,7 +394,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
  * @return Whether the whole transaction can continue
 **/
 bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
-    printf("in tm_write, %p\n", (void*)tx);
+    printf("in tm_write, %p, size: %zu\n", (void*)tx, size);
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         printf("tm_write: size modulo alignment != 0\n");

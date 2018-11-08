@@ -401,7 +401,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
         return false;
     }
 
-    size_t start_index = get_start_index(shared, source);
+    size_t start_index = get_start_index(shared, target);
     printf("tm_write, start_index: %zu\n", start_index);
     size_t number_of_items = get_nb_items(size, alignment);
     printf("tm_write, number_of_items: %zu\n", number_of_items);

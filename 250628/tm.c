@@ -259,7 +259,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
         memory_state[i].written = false;
         memory_state[i].new_val = NULL;
     }
-    transaction->memory_state = memory_state;
+    trans->memory_state = memory_state;
     printf("return from tm_begin: %p\n", (void*)trans);
     return (tx_t)trans;
 }

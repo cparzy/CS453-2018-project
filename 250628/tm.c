@@ -75,10 +75,8 @@ void free_ptr(void* ptr);
 
 bool lock_write_set(shared_t shared, tx_t tx);
 
-bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused));
-
-void propagate_writes(shared_t shared as(unused), tx_t tx as(unused));
-
+bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items);
+void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items);
 void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t nb_items);
 
 bool tm_validate(shared_t shared as(unused), tx_t tx as(unused));
@@ -149,9 +147,9 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     }
 
     // Fill the first segment of the region with 0s
-    printf("Fill the first segment of the region with 0s\n");
+    // printf("Fill the first segment of the region with 0s\n");
     memset(region->start, 0, size);
-    printf("tm_create, start: %p\n", region->start);
+    // printf("tm_create, start: %p\n", region->start);
 
     atomic_init(&(region->size), size);
     atomic_init(&(region->align), align);
@@ -170,11 +168,11 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     }
 
     for (size_t i = 0; i < number_of_items; i++) {
-        printf("initiating version_locks[%zu]\n", i);
+        // printf("initiating version_locks[%zu]\n", i);
         atomic_init(&(version_locks[i].version), 0);
         atomic_init(&(version_locks[i].lock), false);
     }
-    printf("After initiating version locks\n");
+    // printf("After initiating version locks\n");
     region->version_locks = version_locks;
     printf("Before returning region\n");
     return region;    
@@ -198,7 +196,7 @@ void tm_destroy(shared_t shared as(unused)) {
 **/
 void* tm_start(shared_t shared as(unused)) {
     // TODO: tm_start(shared_t)
-    printf("in tm_start\n");
+    // printf("in tm_start\n");
     // TODO: start may have to be an atomic pointer!
     return ((struct region*)shared)->start;
 }
@@ -209,9 +207,9 @@ void* tm_start(shared_t shared as(unused)) {
 **/
 size_t tm_size(shared_t shared as(unused)) {
     // TODO: may have to cast to size_t
-    printf("In tm_size\n");
+    // printf("In tm_size\n");
     size_t size = atomic_load(&(((struct region*)shared)->size));
-    printf("return from tm_size: %zu\n", size);
+    // printf("return from tm_size: %zu\n", size);
     return size;
 }
 
@@ -220,9 +218,9 @@ size_t tm_size(shared_t shared as(unused)) {
  * @return Alignment used globally
 **/
 size_t tm_align(shared_t shared as(unused)) {
-    printf("in tm_align\n");
+    // printf("in tm_align\n");
     size_t align = atomic_load(&(((struct region*)shared)->align));
-    printf("return from tm_align: %zu\n", align);
+    // printf("return from tm_align: %zu\n", align);
     return align;
 }
 
@@ -275,7 +273,9 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
         printf("tm_end read-only\n");
         return true;
     }
-    return tm_validate(shared, tx);
+    bool validated = tm_validate(shared, tx);
+    free_transaction(tx);
+    return validated;
 }
 
 void free_transaction(tx_t tx as(unused)) {
@@ -289,25 +289,25 @@ void free_transaction(tx_t tx as(unused)) {
 }
 
 size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused)) {
-    printf("in get_start_index\n");
+    // printf("in get_start_index\n");
     if (shared == NULL || mem_ptr == NULL) {
         printf("shared == NULL || mem_ptr == NULL\n");
     }
     size_t alignment = tm_align(shared);
     void* start = tm_start(shared);
-    printf("get_start_index, start: %p, mem_ptr: %p, alignment: %zu\n", start, mem_ptr, alignment);
+    // printf("get_start_index, start: %p, mem_ptr: %p, alignment: %zu\n", start, mem_ptr, alignment);
     size_t start_index = (mem_ptr - start) / alignment;
-    printf("return from get_start_index: %zu\n", start_index);
+    // printf("return from get_start_index: %zu\n", start_index);
     return start_index;
 }
 
 size_t get_nb_items(size_t size, size_t alignment) {
-    printf("in get_nb_items, size: %zu, alignment: %zu\n", size, alignment);
-    if (alignment == 0) {
-        printf("get_nb_items, alignment == 0\n");
-    }
+    // printf("in get_nb_items, size: %zu, alignment: %zu\n", size, alignment);
+    // if (alignment == 0) {
+    //     printf("get_nb_items, alignment == 0\n");
+    // }
     size_t nb_items = size / alignment;
-    printf("returns from get_nb_items: %zu\n", nb_items);
+    // printf("returns from get_nb_items: %zu\n", nb_items);
     return nb_items;
 }
 
@@ -344,23 +344,24 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
-    printf("in tm_read: %p, size: %zu\n", (void*)tx, size);
+    // printf("in tm_read: %p, size: %zu\n", (void*)tx, size);
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         printf("tm_read, size modulo alignment != 0\n");
         return false;
     }
     size_t start_index = get_start_index(shared, source);
-    printf("tm_read, start_index: %zu\n", start_index);
+    // printf("tm_read, start_index: %zu\n", start_index);
     // number of items we want to read
     size_t number_of_items = get_nb_items(size, alignment);
-    printf("tm_read, number_of_items: %zu\n", number_of_items);
+    // printf("tm_read, number_of_items: %zu\n", number_of_items);
+    printf("tm_read, tx: %p, size: %zu, start_index: %zu, number_of_items: %zu\n", (void*)tx, size, start_index, number_of_items);
     const void* current_src_slot = source;
     void* current_trgt_slot = target;
-    printf("tm_read, going from %zu, to %zu\n", start_index, start_index + number_of_items);
+    // printf("tm_read, going from %zu, to %zu\n", start_index, start_index + number_of_items);
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
-        printf("current_src_slot: %p\n", current_src_slot);
-        printf("current_trgt_slot: %p\n", current_trgt_slot);
+        // printf("current_src_slot: %p\n", current_src_slot);
+        // printf("current_trgt_slot: %p\n", current_trgt_slot);
         shared_memory_state memory_state = ((struct transaction*)tx)->memory_state[i];
         if (memory_state.written) {
             printf("tm_read, copying from local write-set\n");
@@ -396,7 +397,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
  * @return Whether the whole transaction can continue
 **/
 bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
-    printf("in tm_write, %p, size: %zu\n", (void*)tx, size);
+    // printf("in tm_write, %p, size: %zu\n", (void*)tx, size);
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         printf("tm_write: size modulo alignment != 0\n");
@@ -404,19 +405,21 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     }
 
     size_t start_index = get_start_index(shared, target);
-    printf("tm_write, start_index: %zu\n", start_index);
+    // printf("tm_write, start_index: %zu\n", start_index);
     size_t number_of_items = get_nb_items(size, alignment);
-    printf("tm_write, number_of_items: %zu\n", number_of_items);
+    // printf("tm_write, number_of_items: %zu\n", number_of_items);
     void* current_trgt_slot = target;
-    printf("tm_write, going from %zu, to %zu\n", start_index, start_index + number_of_items);
+    // printf("tm_write, going from %zu, to %zu\n", start_index, start_index + number_of_items);
+    printf("tm_write, tx: %p, size: %zu, start_index: %zu, number_of_items: %zu\n", (void*)tx, size, start_index, number_of_items);
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
-        printf("tm_write, current_trgt_slot: %p\n", current_trgt_slot);
-        printf("tm_write, tx->memory_state: %p\n", (void*)((struct transaction*)tx)->memory_state);
+        // printf("tm_write, current_trgt_slot: %p\n", current_trgt_slot);
+        // printf("tm_write, tx->memory_state: %p\n", (void*)((struct transaction*)tx)->memory_state);
         shared_memory_state memory_state = ((struct transaction*)tx)->memory_state[i];
         if (memory_state.written) {
             printf("tm_written, written == true\n");
             memcpy(memory_state.new_val, current_trgt_slot, alignment);
         } else {
+            printf("tm_written, written == false\n");
             void* local_content = (void*) malloc(alignment);
             if (unlikely(!local_content)) {
                 printf("tm_write, unlikely(!local_content)\n");
@@ -439,7 +442,7 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
     // lock the write-set
     if (!lock_write_set(shared, tx)) {
         printf("tm_validate, was not able to lock write set\n");
-        free_transaction(tx);
+        // free_transaction(tx);
         return false;
     }
 
@@ -456,20 +459,23 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
 
     ((struct transaction*)tx)->vw = vw;
 
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    size_t nb_items = get_nb_items(size, alignment);
+
     if (((struct transaction*)tx)->rv + 1 != vw) {
         // Validate read-set
-        if (!valide_read_set(shared, tx)) {
+        if (!valide_read_set(shared, tx, nb_items)) {
             printf("tm_validate: valide_read_set returned false\n");
-            size_t nb_items = get_nb_items(tm_size(shared), tm_align(shared));
             printf("propagate_writes: nb_items: %zu\n", nb_items);
             release_write_lock(shared, tx, nb_items);
-            free_transaction(tx);
+            // free_transaction(tx);
             return false;
         }
     } 
 
     // Propage writes to shared memory and release write locks
-    propagate_writes(shared, tx);
+    propagate_writes(shared, tx, alignment, nb_items);
 
     printf("tm_validate returns true\n");
     return true;
@@ -479,8 +485,8 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
 // It will release the nb_items first locks
 // If you want to release all locks, nb_items should be equals to the total number of items (size / alignment)
 void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t nb_items) {
-    printf("in release_write_lock\n");
-    printf("nb_items: %zu\n", nb_items);
+    printf("in release_write_lock, nb_items: %zu\n", nb_items);
+    // printf("nb_items: %zu\n", nb_items);
     if (shared == NULL || (void*)tx == NULL) {
         printf("release_write_lock: shared == NULL || tx == NULL\n");
         return;
@@ -496,11 +502,7 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
     printf("finish release_write_lock\n");
 }
 
-void propagate_writes(shared_t shared as(unused), tx_t tx as(unused)) {
-    printf("In propagate_writes\n");
-    size_t size = tm_size(shared);
-    size_t alignment = tm_align(shared);
-    size_t number_of_items = get_nb_items(size, alignment);
+void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items) {
     printf("propagate_writes: number_of_items: %zu\n", number_of_items);
     void* start = tm_start(shared);
     for (size_t i = 0; i < number_of_items; i++) {
@@ -527,15 +529,11 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused)) {
     printf("Finish propagate writes\n");
 }
 
-bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused)) {
-    printf("in validate_read_set\n");
+bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items) {
     if (shared == NULL || (void*)tx == NULL) {
         printf("valide_read_set: shared == NULL || tx == NULL\n");
         return false;
     }
-    size_t size = tm_size(shared);
-    size_t alignment = tm_align(shared);
-    size_t number_of_items = get_nb_items(size, alignment);
     printf("valide_read_set: number_of_items: %zu\n", number_of_items);
     for (size_t i = 0; i < number_of_items; i++) {
         // If is read-set
@@ -553,7 +551,7 @@ bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused)) {
 }
 
 bool lock_write_set(shared_t shared, tx_t tx) {
-    printf("in lock_write_set\n");
+    // printf("in lock_write_set\n");
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
     size_t number_of_items = get_nb_items(size, alignment);
@@ -576,7 +574,7 @@ bool lock_write_set(shared_t shared, tx_t tx) {
 }
 
 void free_ptr(void* ptr) {
-    printf("In free pointer\n");
+    // printf("In free pointer\n");
     free(ptr);
     ptr = NULL;
 }

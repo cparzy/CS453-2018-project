@@ -88,6 +88,8 @@ size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused
 
 void free_transaction(tx_t tx as(unused));
 
+
+
 typedef struct {
     atomic_bool lock;
     atomic_int version;
@@ -95,12 +97,9 @@ typedef struct {
 
 struct region {
     void* start;
-    // atomic_size_t size;        // Size of the shared memory region (in bytes)
-    // atomic_size_t align;       // Claimed alignment of the shared memory region (in bytes)
-    // atomic_size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
-    size_t size;
-    size_t align;
-    size_t align_alloc;
+    atomic_size_t size;        // Size of the shared memory region (in bytes)
+    atomic_size_t align;       // Claimed alignment of the shared memory region (in bytes)
+    atomic_size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
     atomic_int VClock;
     version_lock* version_locks;
 };
@@ -151,12 +150,10 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // printf("Fill the first segment of the region with 0s\n");
     memset(region->start, 0, size);
     // printf("tm_create, start: %p\n", region->start);
-    region->size = size;
-    region->align = align;
-    region->align_alloc = align_alloc;
-    // atomic_init(&(region->size), size);
-    // atomic_init(&(region->align), align);
-    // atomic_init(&(region->align_alloc), align_alloc);
+
+    atomic_init(&(region->size), size);
+    atomic_init(&(region->align), align);
+    atomic_init(&(region->align_alloc), align_alloc);
     atomic_init(&(region->VClock), 0);
 
     size_t number_of_items = size / align;
@@ -211,10 +208,9 @@ void* tm_start(shared_t shared as(unused)) {
 size_t tm_size(shared_t shared as(unused)) {
     // TODO: may have to cast to size_t
     // printf("In tm_size\n");
-    // size_t size = atomic_load(&(((struct region*)shared)->size));
+    size_t size = atomic_load(&(((struct region*)shared)->size));
     // printf("return from tm_size: %zu\n", size);
-    // return size;
-    return ((struct region*)shared)->size;
+    return size;
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
@@ -223,10 +219,9 @@ size_t tm_size(shared_t shared as(unused)) {
 **/
 size_t tm_align(shared_t shared as(unused)) {
     // printf("in tm_align\n");
-    // size_t align = atomic_load(&(((struct region*)shared)->align));
+    size_t align = atomic_load(&(((struct region*)shared)->align));
     // printf("return from tm_align: %zu\n", align);
-    // return align;
-    return ((struct region*)shared)->align;
+    return align;
 }
 
 /** [thread-safe] Begin a new transaction on the given shared memory region.
@@ -353,7 +348,6 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         printf("tm_read, size modulo alignment != 0\n");
-        free_transaction(tx);
         return false;
     }
     size_t start_index = get_start_index(shared, source);
@@ -407,7 +401,6 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         printf("tm_write: size modulo alignment != 0\n");
-        free_transaction(tx);
         return false;
     }
 

@@ -317,13 +317,13 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
     }
     // printf("validate_after_read, going from %zu, to %zu\n", start_index, (start_index + nb_items));
     for (size_t i = start_index; i < start_index + nb_items; i++) {
-        version_lock v_l = ((struct region*)shared)->version_locks[i];
-        bool locked = atomic_load(&(v_l.lock));
+        version_lock* v_l = &(((struct region*)shared)->version_locks[i]);
+        bool locked = atomic_load(&(v_l->lock));
         if (locked) {
             // printf("validate_after_read, locked!, return false\n");
             return false;
         }
-        int version = atomic_load(&(v_l.version));
+        int version = atomic_load(&(v_l->version));
         if (version > ((struct transaction*)tx)->rv) {
             // printf("validate_after_read, version bad!, return false\n");
             return false;
@@ -360,9 +360,10 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
         // printf("current_src_slot: %p\n", current_src_slot);
         // printf("current_trgt_slot: %p\n", current_trgt_slot);
-        if (((struct transaction*)tx)->memory_state[i].new_val != NULL) {
+        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
+        if (memory_state->new_val != NULL) {
             // printf("tm_read, copying from local write-set\n");
-            memcpy(current_trgt_slot, ((struct transaction*)tx)->memory_state[i].new_val, alignment);
+            memcpy(current_trgt_slot, memory_state->new_val, alignment);
         } else {
             // printf("tm_read, copying from shared memory\n");
             // Check lock and timestamp
@@ -411,19 +412,20 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
         // printf("tm_write, current_trgt_slot: %p\n", current_trgt_slot);
         // printf("tm_write, tx->memory_state: %p\n", (void*)((struct transaction*)tx)->memory_state);
-        if (((struct transaction*)tx)->memory_state[i].new_val != NULL) {
+        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
+        if (memory_state->new_val != NULL) {
             // printf("tm_written, written == true\n");
-            memcpy(((struct transaction*)tx)->memory_state[i].new_val, current_trgt_slot, alignment);
+            memcpy(memory_state->new_val, current_trgt_slot, alignment);
         } else {
             // printf("tm_written, written == false\n");
-            ((struct transaction*)tx)->memory_state[i].new_val = malloc(alignment);
+            memory_state->new_val = malloc(alignment);
             // void* local_content = malloc(alignment);
-            if (unlikely(!((struct transaction*)tx)->memory_state[i].new_val)) {
+            if (unlikely(!(memory_state->new_val))) {
                 // printf("tm_write, unlikely(!local_content)\n");
                 free_transaction(tx);
                 return false;
             }
-            memcpy(((struct transaction*)tx)->memory_state[i].new_val, current_trgt_slot, alignment);
+            memcpy(memory_state->new_val, current_trgt_slot, alignment);
             // may be replaced by memory_state->new_val = local_content;
             // memory_state.new_val = local_content;
             printf("tm_write: %d\n", (((struct transaction*)tx)->memory_state[i].new_val != NULL));
@@ -506,20 +508,22 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t ali
     void* start = tm_start(shared);
     for (size_t i = 0; i < number_of_items; i++) {
         // shared_memory_state ith_memory_state = ((struct transaction*)tx)->memory_state[i];
-        printf("%d\n", (((struct transaction*)tx)->memory_state[i].new_val != NULL));
+        shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
+        printf("%d\n", (ith_memory_state->new_val != NULL));
         // If is read-set
-        if (((struct transaction*)tx)->memory_state[i].new_val != NULL) {
+        if (ith_memory_state->new_val != NULL) {
             printf("Propagating writes to shared memory\n");
             // point to the correct location in shared memory
             void* target_pointer = (i * alignment) + (char*)start;
             // copy the content written by the transaction in shared memory
-            memcpy(target_pointer, ((struct transaction*)tx)->memory_state[i].new_val, alignment);
+            memcpy(target_pointer, ith_memory_state->new_val, alignment);
             // get the versioned-lock
             // version_lock ith_version_lock = ((struct region*)shared)->version_locks[i];
+            version_lock* ith_version_lock = &(((struct region*)shared)->version_locks[i]);
             // set version value to the write-version
-            atomic_store(&(((struct region*)shared)->version_locks[i].version), ((struct transaction*)tx)->vw);
+            atomic_store(&(ith_version_lock->version), ((struct transaction*)tx)->vw);
             // release the lock
-            atomic_store(&(((struct region*)shared)->version_locks[i].lock), false);
+            atomic_store(&(ith_version_lock->lock), false);
         }
     }
 
@@ -535,8 +539,8 @@ bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t nu
     for (size_t i = 0; i < number_of_items; i++) {
         // If is read-set
         if (((struct transaction*)tx)->memory_state[i].read) {
-            version_lock curr_version_lock = ((struct region*)shared)->version_locks[i];
-            if (atomic_load(&(curr_version_lock.lock)) && atomic_load(&(curr_version_lock.version)) > ((struct transaction*)tx)->rv) {
+            version_lock* curr_version_lock = &(((struct region*)shared)->version_locks[i]);
+            if (atomic_load(&(curr_version_lock->lock)) && atomic_load(&(curr_version_lock->version)) > ((struct transaction*)tx)->rv) {
                 // printf("validate_read_set, returns false, locked or bad version\n");
                 return false;
             }

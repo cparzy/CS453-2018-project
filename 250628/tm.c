@@ -502,7 +502,7 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
 }
 
 void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items) {
-    // printf("propagate_writes: number_of_items: %zu\n", number_of_items);
+    printf("propagate_writes: number_of_items: %zu\n", number_of_items);
     void* start = tm_start(shared);
     for (size_t i = 0; i < number_of_items; i++) {
         shared_memory_state ith_memory_state = ((struct transaction*)tx)->memory_state[i];

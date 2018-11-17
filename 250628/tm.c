@@ -427,6 +427,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             memcpy(local_content, current_trgt_slot, alignment);
             // may be replaced by memory_state->new_val = local_content;
             memory_state.new_val = local_content;
+            printf("tm_write: %d", (((struct transaction*)tx)->memory_state[i].new_val != NULL));
         }
         current_trgt_slot = alignment + (char*)current_trgt_slot;
     }
@@ -502,16 +503,13 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
 }
 
 void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items) {
-    printf("propagate_writes: number_of_items: %zu\n", number_of_items);
+    // printf("propagate_writes: number_of_items: %zu\n", number_of_items);
     void* start = tm_start(shared);
     for (size_t i = 0; i < number_of_items; i++) {
         shared_memory_state ith_memory_state = ((struct transaction*)tx)->memory_state[i];
+        printf("%d\n", (((struct transaction*)tx)->memory_state[i].new_val != NULL));
         // If is read-set
         if (ith_memory_state.new_val != NULL) {
-            if (ith_memory_state.new_val == NULL) {
-                // printf("Error: ith_memory_state.new_val == NULL\n");
-                continue;
-            }
             printf("Propagating writes to shared memory\n");
             // point to the correct location in shared memory
             void* target_pointer = (i * alignment) + (char*)start;

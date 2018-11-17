@@ -426,7 +426,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             memcpy(((struct transaction*)tx)->memory_state[i].new_val, current_trgt_slot, alignment);
             // may be replaced by memory_state->new_val = local_content;
             // memory_state.new_val = local_content;
-            printf("tm_write: %d", (((struct transaction*)tx)->memory_state[i].new_val != NULL));
+            printf("tm_write: %d\n", (((struct transaction*)tx)->memory_state[i].new_val != NULL));
         }
         current_trgt_slot = alignment + (char*)current_trgt_slot;
     }

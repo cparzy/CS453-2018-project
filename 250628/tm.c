@@ -197,7 +197,8 @@ void* tm_start(shared_t shared as(unused)) {
     // TODO: tm_start(shared_t)
  
     // TODO: start may have to be an atomic pointer!
-    return ((struct region*)shared)->start;
+    size_t start = atomic_load(&(((struct region*)shared)->start))
+    return start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.

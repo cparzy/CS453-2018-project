@@ -105,7 +105,6 @@ struct region {
 };
 
 typedef struct {
-    bool written;
     bool read;
     void* new_val;
 } shared_memory_state;
@@ -254,7 +253,6 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
     }
     for (size_t i = 0; i < number_of_items; i++) {
         memory_state[i].read = false;
-        memory_state[i].written = false;
         memory_state[i].new_val = NULL;
     }
     trans->memory_state = memory_state;
@@ -363,7 +361,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
         // printf("current_src_slot: %p\n", current_src_slot);
         // printf("current_trgt_slot: %p\n", current_trgt_slot);
         shared_memory_state memory_state = ((struct transaction*)tx)->memory_state[i];
-        if (memory_state.written) {
+        if (memory_state.new_val != NULL) {
             // printf("tm_read, copying from local write-set\n");
             memcpy(current_trgt_slot, memory_state.new_val, alignment);
         } else {
@@ -415,12 +413,12 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
         // printf("tm_write, current_trgt_slot: %p\n", current_trgt_slot);
         // printf("tm_write, tx->memory_state: %p\n", (void*)((struct transaction*)tx)->memory_state);
         shared_memory_state memory_state = ((struct transaction*)tx)->memory_state[i];
-        if (memory_state.written) {
+        if (memory_state.new_val != NULL) {
             // printf("tm_written, written == true\n");
             memcpy(memory_state.new_val, current_trgt_slot, alignment);
         } else {
             // printf("tm_written, written == false\n");
-            void* local_content = (void*) malloc(alignment);
+            void* local_content = malloc(alignment);
             if (unlikely(!local_content)) {
                 // printf("tm_write, unlikely(!local_content)\n");
                 free_transaction(tx);
@@ -429,7 +427,6 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             memcpy(local_content, current_trgt_slot, alignment);
             // may be replaced by memory_state->new_val = local_content;
             memory_state.new_val = local_content;
-            memory_state.written = true;
         }
         current_trgt_slot = alignment + (char*)current_trgt_slot;
     }
@@ -493,7 +490,8 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
         return;
     }
     for (size_t i = 0; i < nb_items; i++) {
-        bool in_write_set = ((struct transaction*)tx)->memory_state[i].written;
+        void* val_written = ((struct transaction*)tx)->memory_state[i].new_val;
+        bool in_write_set = val_written != NULL;
         if (in_write_set) {
             bool expected = true;
             atomic_compare_exchange_strong(&(((struct region*)shared)->version_locks[i].lock), &expected, false);
@@ -509,11 +507,12 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t ali
     for (size_t i = 0; i < number_of_items; i++) {
         shared_memory_state ith_memory_state = ((struct transaction*)tx)->memory_state[i];
         // If is read-set
-        if (ith_memory_state.written) {
+        if (ith_memory_state.new_val != NULL) {
             if (ith_memory_state.new_val == NULL) {
                 // printf("Error: ith_memory_state.new_val == NULL\n");
                 continue;
             }
+            printf("Propagating writes to shared memory\n");
             // point to the correct location in shared memory
             void* target_pointer = (i * alignment) + (char*)start;
             // copy the content written by the transaction in shared memory
@@ -558,7 +557,8 @@ bool lock_write_set(shared_t shared, tx_t tx) {
     size_t number_of_items = get_nb_items(size, alignment);
     // printf("lock_write_set: number_of_items: %zu\n", number_of_items);
     for (size_t i = 0; i < number_of_items; i++) {
-        bool in_write_set = ((struct transaction*)tx)->memory_state[i].written;
+        void* val_written = ((struct transaction*)tx)->memory_state[i].new_val;
+        bool in_write_set = val_written != NULL;
         if (in_write_set) {
             bool expected = false;
             bool got_the_lock = atomic_compare_exchange_strong(&(((struct region*)shared)->version_locks[i].lock), &expected, true);

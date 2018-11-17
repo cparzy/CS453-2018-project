@@ -365,6 +365,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
  
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
         shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
+        printf("write at index: %zu\n", i);
         if (memory_state->new_val != NULL) {
             memcpy(memory_state->new_val, current_trgt_slot, alignment);
         } else {
@@ -436,6 +437,7 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t ali
         shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
         // If is write-set
         if (ith_memory_state->new_val != NULL) {
+            printf("Propagate write at index: %zu\n", i);
             // point to the correct location in shared memory
             void* target_pointer = (i * alignment) + (char*)start;
             // copy the content written by the transaction in shared memory

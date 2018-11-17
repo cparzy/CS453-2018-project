@@ -1,0 +1,538 @@
+make[1]: Entering directory '/home/charles_parzy_turlat/conc_algo/CS453-2018-project/reference'
+make[1]: Nothing to be done for 'build'.
+make[1]: Leaving directory '/home/charles_parzy_turlat/conc_algo/CS453-2018-project/reference'
+make[1]: Entering directory '/home/charles_parzy_turlat/conc_algo/CS453-2018-project/250628'
+make[1]: Nothing to be done for 'build'.
+make[1]: Leaving directory '/home/charles_parzy_turlat/conc_algo/CS453-2018-project/250628'
+./grading 453 ../reference.so ../250628.so
+⎧ #worker threads:     8
+⎪ #TX per worker:      50000
+⎪ #repetitions:        7
+⎪ Initial #accounts:   256
+⎪ Expected #accounts:  8192
+⎪ Initial balance:     100
+⎪ Long TX probability: 0.5
+⎪ Allocation TX prob.: 0
+⎪ Slow trigger factor: 10
+⎪ Clock resolution:    1 ns
+⎩ Seed value:          453
+⎧ Evaluating '../reference.so' (reference)...
+⎪ Total user execution time: 800.294 ms
+⎩ Average TX execution time: 2000.74 ns
+⎧ Evaluating '../250628.so'...
+write at index: 0
+write at index: 3
+write at index: 4
+write at index: 5
+write at index: 6
+write at index: 7
+write at index: 8
+write at index: 9
+write at index: 10
+write at index: 11
+write at index: 12
+write at index: 13
+write at index: 14
+write at index: 15
+write at index: 16
+write at index: 17
+write at index: 18
+write at index: 19
+write at index: 20
+write at index: 21
+write at index: 22
+write at index: 23
+write at index: 24
+write at index: 25
+write at index: 26
+write at index: 27
+write at index: 28
+write at index: 29
+write at index: 30
+write at index: 31
+write at index: 32
+write at index: 33
+write at index: 34
+write at index: 35
+write at index: 36
+write at index: 37
+write at index: 38
+write at index: 39
+write at index: 40
+write at index: 41
+write at index: 42
+write at index: 43
+write at index: 44
+write at index: 45
+write at index: 46
+write at index: 47
+write at index: 48
+write at index: 49
+write at index: 50
+write at index: 51
+write at index: 52
+write at index: 53
+write at index: 54
+write at index: 55
+write at index: 56
+write at index: 57
+write at index: 58
+write at index: 59
+write at index: 60
+write at index: 61
+write at index: 62
+write at index: 63
+write at index: 64
+write at index: 65
+write at index: 66
+write at index: 67
+write at index: 68
+write at index: 69
+write at index: 70
+write at index: 71
+write at index: 72
+write at index: 73
+write at index: 74
+write at index: 75
+write at index: 76
+write at index: 77
+write at index: 78
+write at index: 79
+write at index: 80
+write at index: 81
+write at index: 82
+write at index: 83
+write at index: 84
+write at index: 85
+write at index: 86
+write at index: 87
+write at index: 88
+write at index: 89
+write at index: 90
+write at index: 91
+write at index: 92
+write at index: 93
+write at index: 94
+write at index: 95
+write at index: 96
+write at index: 97
+write at index: 98
+write at index: 99
+write at index: 100
+write at index: 101
+write at index: 102
+write at index: 103
+write at index: 104
+write at index: 105
+write at index: 106
+write at index: 107
+write at index: 108
+write at index: 109
+write at index: 110
+write at index: 111
+write at index: 112
+write at index: 113
+write at index: 114
+write at index: 115
+write at index: 116
+write at index: 117
+write at index: 118
+write at index: 119
+write at index: 120
+write at index: 121
+write at index: 122
+write at index: 123
+write at index: 124
+write at index: 125
+write at index: 126
+write at index: 127
+write at index: 128
+write at index: 129
+write at index: 130
+write at index: 131
+write at index: 132
+write at index: 133
+write at index: 134
+write at index: 135
+write at index: 136
+write at index: 137
+write at index: 138
+write at index: 139
+write at index: 140
+write at index: 141
+write at index: 142
+write at index: 143
+write at index: 144
+write at index: 145
+write at index: 146
+write at index: 147
+write at index: 148
+write at index: 149
+write at index: 150
+write at index: 151
+write at index: 152
+write at index: 153
+write at index: 154
+write at index: 155
+write at index: 156
+write at index: 157
+write at index: 158
+write at index: 159
+write at index: 160
+write at index: 161
+write at index: 162
+write at index: 163
+write at index: 164
+write at index: 165
+write at index: 166
+write at index: 167
+write at index: 168
+write at index: 169
+write at index: 170
+write at index: 171
+write at index: 172
+write at index: 173
+write at index: 174
+write at index: 175
+write at index: 176
+write at index: 177
+write at index: 178
+write at index: 179
+write at index: 180
+write at index: 181
+write at index: 182
+write at index: 183
+write at index: 184
+write at index: 185
+write at index: 186
+write at index: 187
+write at index: 188
+write at index: 189
+write at index: 190
+write at index: 191
+write at index: 192
+write at index: 193
+write at index: 194
+write at index: 195
+write at index: 196
+write at index: 197
+write at index: 198
+write at index: 199
+write at index: 200
+write at index: 201
+write at index: 202
+write at index: 203
+write at index: 204
+write at index: 205
+write at index: 206
+write at index: 207
+write at index: 208
+write at index: 209
+write at index: 210
+write at index: 211
+write at index: 212
+write at index: 213
+write at index: 214
+write at index: 215
+write at index: 216
+write at index: 217
+write at index: 218
+write at index: 219
+write at index: 220
+write at index: 221
+write at index: 222
+write at index: 223
+write at index: 224
+write at index: 225
+write at index: 226
+write at index: 227
+write at index: 228
+write at index: 229
+write at index: 230
+write at index: 231
+write at index: 232
+write at index: 233
+write at index: 234
+write at index: 235
+write at index: 236
+write at index: 237
+write at index: 238
+write at index: 239
+write at index: 240
+write at index: 241
+write at index: 242
+write at index: 243
+write at index: 244
+write at index: 245
+write at index: 246
+write at index: 247
+write at index: 248
+write at index: 249
+write at index: 250
+write at index: 251
+write at index: 252
+write at index: 253
+write at index: 254
+write at index: 255
+write at index: 256
+write at index: 257
+write at index: 258
+Propagate write at index: 0
+Propagate write at index: 3
+Propagate write at index: 4
+Propagate write at index: 5
+Propagate write at index: 6
+Propagate write at index: 7
+Propagate write at index: 8
+Propagate write at index: 9
+Propagate write at index: 10
+Propagate write at index: 11
+Propagate write at index: 12
+Propagate write at index: 13
+Propagate write at index: 14
+Propagate write at index: 15
+Propagate write at index: 16
+Propagate write at index: 17
+Propagate write at index: 18
+Propagate write at index: 19
+Propagate write at index: 20
+Propagate write at index: 21
+Propagate write at index: 22
+Propagate write at index: 23
+Propagate write at index: 24
+Propagate write at index: 25
+Propagate write at index: 26
+Propagate write at index: 27
+Propagate write at index: 28
+Propagate write at index: 29
+Propagate write at index: 30
+Propagate write at index: 31
+Propagate write at index: 32
+Propagate write at index: 33
+Propagate write at index: 34
+Propagate write at index: 35
+Propagate write at index: 36
+Propagate write at index: 37
+Propagate write at index: 38
+Propagate write at index: 39
+Propagate write at index: 40
+Propagate write at index: 41
+Propagate write at index: 42
+Propagate write at index: 43
+Propagate write at index: 44
+Propagate write at index: 45
+Propagate write at index: 46
+Propagate write at index: 47
+Propagate write at index: 48
+Propagate write at index: 49
+Propagate write at index: 50
+Propagate write at index: 51
+Propagate write at index: 52
+Propagate write at index: 53
+Propagate write at index: 54
+Propagate write at index: 55
+Propagate write at index: 56
+Propagate write at index: 57
+Propagate write at index: 58
+Propagate write at index: 59
+Propagate write at index: 60
+Propagate write at index: 61
+Propagate write at index: 62
+Propagate write at index: 63
+Propagate write at index: 64
+Propagate write at index: 65
+Propagate write at index: 66
+Propagate write at index: 67
+Propagate write at index: 68
+Propagate write at index: 69
+Propagate write at index: 70
+Propagate write at index: 71
+Propagate write at index: 72
+Propagate write at index: 73
+Propagate write at index: 74
+Propagate write at index: 75
+Propagate write at index: 76
+Propagate write at index: 77
+Propagate write at index: 78
+Propagate write at index: 79
+Propagate write at index: 80
+Propagate write at index: 81
+Propagate write at index: 82
+Propagate write at index: 83
+Propagate write at index: 84
+Propagate write at index: 85
+Propagate write at index: 86
+Propagate write at index: 87
+Propagate write at index: 88
+Propagate write at index: 89
+Propagate write at index: 90
+Propagate write at index: 91
+Propagate write at index: 92
+Propagate write at index: 93
+Propagate write at index: 94
+Propagate write at index: 95
+Propagate write at index: 96
+Propagate write at index: 97
+Propagate write at index: 98
+Propagate write at index: 99
+Propagate write at index: 100
+Propagate write at index: 101
+Propagate write at index: 102
+Propagate write at index: 103
+Propagate write at index: 104
+Propagate write at index: 105
+Propagate write at index: 106
+Propagate write at index: 107
+Propagate write at index: 108
+Propagate write at index: 109
+Propagate write at index: 110
+Propagate write at index: 111
+Propagate write at index: 112
+Propagate write at index: 113
+Propagate write at index: 114
+Propagate write at index: 115
+Propagate write at index: 116
+Propagate write at index: 117
+Propagate write at index: 118
+Propagate write at index: 119
+Propagate write at index: 120
+Propagate write at index: 121
+Propagate write at index: 122
+Propagate write at index: 123
+Propagate write at index: 124
+Propagate write at index: 125
+Propagate write at index: 126
+Propagate write at index: 127
+Propagate write at index: 128
+Propagate write at index: 129
+Propagate write at index: 130
+Propagate write at index: 131
+Propagate write at index: 132
+Propagate write at index: 133
+Propagate write at index: 134
+Propagate write at index: 135
+Propagate write at index: 136
+Propagate write at index: 137
+Propagate write at index: 138
+Propagate write at index: 139
+Propagate write at index: 140
+Propagate write at index: 141
+Propagate write at index: 142
+Propagate write at index: 143
+Propagate write at index: 144
+Propagate write at index: 145
+Propagate write at index: 146
+Propagate write at index: 147
+Propagate write at index: 148
+Propagate write at index: 149
+Propagate write at index: 150
+Propagate write at index: 151
+Propagate write at index: 152
+Propagate write at index: 153
+Propagate write at index: 154
+Propagate write at index: 155
+Propagate write at index: 156
+Propagate write at index: 157
+Propagate write at index: 158
+Propagate write at index: 159
+Propagate write at index: 160
+Propagate write at index: 161
+Propagate write at index: 162
+Propagate write at index: 163
+Propagate write at index: 164
+Propagate write at index: 165
+Propagate write at index: 166
+Propagate write at index: 167
+Propagate write at index: 168
+Propagate write at index: 169
+Propagate write at index: 170
+Propagate write at index: 171
+Propagate write at index: 172
+Propagate write at index: 173
+Propagate write at index: 174
+Propagate write at index: 175
+Propagate write at index: 176
+Propagate write at index: 177
+Propagate write at index: 178
+Propagate write at index: 179
+Propagate write at index: 180
+Propagate write at index: 181
+Propagate write at index: 182
+Propagate write at index: 183
+Propagate write at index: 184
+Propagate write at index: 185
+Propagate write at index: 186
+Propagate write at index: 187
+Propagate write at index: 188
+Propagate write at index: 189
+Propagate write at index: 190
+Propagate write at index: 191
+Propagate write at index: 192
+Propagate write at index: 193
+Propagate write at index: 194
+Propagate write at index: 195
+Propagate write at index: 196
+Propagate write at index: 197
+Propagate write at index: 198
+Propagate write at index: 199
+Propagate write at index: 200
+Propagate write at index: 201
+Propagate write at index: 202
+Propagate write at index: 203
+Propagate write at index: 204
+Propagate write at index: 205
+Propagate write at index: 206
+Propagate write at index: 207
+Propagate write at index: 208
+Propagate write at index: 209
+Propagate write at index: 210
+Propagate write at index: 211
+Propagate write at index: 212
+Propagate write at index: 213
+Propagate write at index: 214
+Propagate write at index: 215
+Propagate write at index: 216
+Propagate write at index: 217
+Propagate write at index: 218
+Propagate write at index: 219
+Propagate write at index: 220
+Propagate write at index: 221
+Propagate write at index: 222
+Propagate write at index: 223
+Propagate write at index: 224
+Propagate write at index: 225
+Propagate write at index: 226
+Propagate write at index: 227
+Propagate write at index: 228
+Propagate write at index: 229
+Propagate write at index: 230
+Propagate write at index: 231
+Propagate write at index: 232
+Propagate write at index: 233
+Propagate write at index: 234
+Propagate write at index: 235
+Propagate write at index: 236
+Propagate write at index: 237
+Propagate write at index: 238
+Propagate write at index: 239
+Propagate write at index: 240
+Propagate write at index: 241
+Propagate write at index: 242
+Propagate write at index: 243
+Propagate write at index: 244
+Propagate write at index: 245
+Propagate write at index: 246
+Propagate write at index: 247
+Propagate write at index: 248
+Propagate write at index: 249
+Propagate write at index: 250
+Propagate write at index: 251
+Propagate write at index: 252
+Propagate write at index: 253
+Propagate write at index: 254
+Propagate write at index: 255
+Propagate write at index: 256
+Propagate write at index: 257
+Propagate write at index: 258
+⎪ Total user execution time: 3401.25 ms -> 0.235294 speedup
+⎩ Average TX execution time: 8503.12 ns

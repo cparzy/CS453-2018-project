@@ -75,7 +75,7 @@ void free_ptr(void* ptr);
 
 bool lock_write_set(shared_t shared, tx_t tx);
 
-bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items);
+bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items);
 void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items);
 void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t nb_items);
 
@@ -428,7 +428,8 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             }
             memcpy(local_content, current_trgt_slot, alignment);
             // may be replaced by memory_state->new_val = local_content;
-            ((struct transaction*)tx)->memory_state[i].new_val = local_content;
+            memory_state.new_val = local_content;
+            memory_state.written = true;
         }
         current_trgt_slot = alignment + (char*)current_trgt_slot;
     }
@@ -465,8 +466,8 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
 
     if (((struct transaction*)tx)->rv + 1 != vw) {
         // Validate read-set
-        if (!valide_read_set(shared, tx, nb_items)) {
-            // printf("tm_validate: valide_read_set returned false\n");
+        if (!validate_read_set(shared, tx, nb_items)) {
+            // printf("tm_validate: validate_read_set returned false\n");
             // printf("propagate_writes: nb_items: %zu\n", nb_items);
             release_write_lock(shared, tx, nb_items);
             // free_transaction(tx);
@@ -529,12 +530,12 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t ali
     // printf("Finish propagate writes\n");
 }
 
-bool valide_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items) {
+bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items) {
     if (shared == NULL || (void*)tx == NULL) {
-        // printf("valide_read_set: shared == NULL || tx == NULL\n");
+        // printf("validate_read_set: shared == NULL || tx == NULL\n");
         return false;
     }
-    // printf("valide_read_set: number_of_items: %zu\n", number_of_items);
+    // printf("validate_read_set: number_of_items: %zu\n", number_of_items);
     for (size_t i = 0; i < number_of_items; i++) {
         // If is read-set
         if (((struct transaction*)tx)->memory_state[i].read) {

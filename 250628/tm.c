@@ -76,7 +76,7 @@ void free_ptr(void* ptr);
 bool lock_write_set(shared_t shared, tx_t tx);
 
 bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items);
-void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items);
+void propagate_writes(shared_t shared as(unused), tx_t tx as(unused));
 void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t nb_items);
 
 bool tm_validate(shared_t shared as(unused), tx_t tx as(unused));
@@ -255,9 +255,16 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
 **/
 bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
     if (((struct transaction*)tx)->is_ro) {
+        free_transaction(tx);
         return true;
     }
     bool validated = tm_validate(shared, tx);
+    if (!validated) {
+        free_transaction(tx);
+        return false;
+    }
+    // Propage writes to shared memory and release write locks
+    propagate_writes(shared, tx);
     free_transaction(tx);
     return validated;
 }
@@ -313,6 +320,7 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
 bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
+        free_transaction(tx);
         return false;
     }
     size_t start_index = get_start_index(shared, source);
@@ -356,15 +364,15 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
 bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
+        free_transaction(tx);
         return false;
     }
 
     size_t start_index = get_start_index(shared, target);
     size_t number_of_items = get_nb_items(size, alignment);
     const void* current_src_slot = source;
-    for (size_t i = 0; i < number_of_items; i++) {
-        size_t memory_state_index = start_index + i;
-        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[memory_state_index]);
+    for (size_t i = start_index; i < start_index + number_of_items; i++) {
+        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
         if (memory_state->new_val != NULL) {
             memcpy(memory_state->new_val, current_src_slot, alignment);
         } else {
@@ -384,7 +392,6 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
     // lock the write-set
     if (!lock_write_set(shared, tx)) {
-        // free_transaction(tx);
         return false;
     }
 
@@ -397,16 +404,13 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
     size_t alignment = tm_align(shared);
     size_t nb_items = get_nb_items(size, alignment);
 
-    if (((struct transaction*)tx)->rv + 1 != vw) {
+    // if (((struct transaction*)tx)->rv + 1 != vw) {
         // Validate read-set
         if (!validate_read_set(shared, tx, nb_items)) {
             release_write_lock(shared, tx, nb_items);
             return false;
         }
-    } 
-
-    // Propage writes to shared memory and release write locks
-    propagate_writes(shared, tx, alignment, nb_items);
+    // } 
 
     return true;
 }
@@ -428,19 +432,21 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
     }
 }
 
-void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t alignment, size_t number_of_items) {
+void propagate_writes(shared_t shared as(unused), tx_t tx as(unused)) {
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    size_t nb_items = get_nb_items(size, alignment);
     void* start = tm_start(shared);
-    for (size_t i = 0; i < number_of_items; i++) {
+    for (size_t i = 0; i < nb_items; i++) {
         // shared_memory_state ith_memory_state = ((struct transaction*)tx)->memory_state[i];
         shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
-        // If is write-set
+        // If in write-set
         if (ith_memory_state->new_val != NULL) {
             // point to the correct location in shared memory
             void* target_pointer = (i * alignment) + (char*)start;
             // copy the content written by the transaction in shared memory
             memcpy(target_pointer, ith_memory_state->new_val, alignment);
             // get the versioned-lock
-            // version_lock ith_version_lock = ((struct region*)shared)->version_locks[i];
             version_lock* ith_version_lock = &(((struct region*)shared)->version_locks[i]);
             // set version value to the write-version
             atomic_store(&(ith_version_lock->version), ((struct transaction*)tx)->vw);

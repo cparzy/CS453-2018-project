@@ -361,24 +361,23 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 
     size_t start_index = get_start_index(shared, target);
     size_t number_of_items = get_nb_items(size, alignment);
-    void* current_trgt_slot = target;
- 
-    for (size_t i = start_index; i < start_index + number_of_items; i++) {
-        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
+    const void* current_src_slot = source;
+    for (size_t i = 0; i < number_of_items; i++) {
+        size_t memory_state_index = start_index + i;
+        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[memory_state_index]);
         if (memory_state->new_val != NULL) {
-            memcpy(memory_state->new_val, current_trgt_slot, alignment);
+            memcpy(memory_state->new_val, current_src_slot, alignment);
         } else {
             memory_state->new_val = malloc(alignment);
             if (unlikely(!(memory_state->new_val))) {
                 free_transaction(tx);
                 return false;
             }
-            memcpy(memory_state->new_val, current_trgt_slot, alignment);         
+            memcpy(memory_state->new_val, current_src_slot, alignment);
         }
-        current_trgt_slot = alignment + (char*)current_trgt_slot;
+        current_src_slot = alignment + (const char*)current_src_slot;
     }
 
- 
     return true;
 }
 
@@ -448,16 +447,13 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused), size_t ali
             // release the lock
             atomic_store(&(ith_version_lock->lock), false);
         }
-    }
-
- 
+    } 
 }
 
 bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items) {
     if (shared == NULL || (void*)tx == NULL) {
         return false;
     }
- 
     for (size_t i = 0; i < number_of_items; i++) {
         // If is read-set
         if (((struct transaction*)tx)->memory_state[i].read) {
@@ -491,7 +487,6 @@ bool lock_write_set(shared_t shared, tx_t tx) {
 }
 
 void free_ptr(void* ptr) {
- 
     free(ptr);
     ptr = NULL;
 }

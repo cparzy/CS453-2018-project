@@ -70,7 +70,7 @@
 
 // -------------------------------------------------------------------------- //
 
-
+#define BYTE_SIZE 8
 
 void free_ptr(void* ptr);
 
@@ -277,8 +277,8 @@ size_t get_nb_items(size_t size, size_t alignment) {
 }
 
 bool is_locked(unsigned int versioned_lock) {
-    unsigned int is_locked_mask = 1 << (sizeof(unsigned int) - 1);
-    return (versioned_lock & is_locked_mask) >> (sizeof(unsigned int) - 1);
+    unsigned int is_locked_mask = 1 << (sizeof(unsigned int) * BYTE_SIZE - 1);
+    return (versioned_lock & is_locked_mask) >> (sizeof(unsigned int) * BYTE_SIZE - 1);
 }
 
 unsigned int extract_version(unsigned int versioned_lock) {
@@ -456,6 +456,7 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused)) {
             memcpy(target_pointer, ith_memory_state->new_val, alignment);
             // get the versioned-lock
             atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[i]);
+            assert(is_locked(atomic_load(ith_version_lock)));
             // set version value to the write-version and release the lock
             unsigned int unlock_mask = ~(0u) >> 1;
             unsigned int new_value = ((struct transaction*)tx)->vw & unlock_mask;
@@ -492,10 +493,12 @@ bool lock_write_set(shared_t shared, tx_t tx) {
         bool in_write_set = val_written != NULL;
         if (in_write_set) {
             atomic_uint* lock = &(((struct region*)shared)->version_locks[i]);
-            unsigned int lock_mask = 1 << (sizeof(unsigned int) - 1);
+            unsigned int lock_mask = 1 << (sizeof(unsigned int) * BYTE_SIZE - 1);
             unsigned int old_value = atomic_load(lock);
+            unsigned int unlock_mask = ~(0u) >> 1;
+	        unsigned int expected_value = old_value & unlock_mask;
             unsigned int new_value = old_value | lock_mask;
-            bool got_the_lock = atomic_compare_exchange_strong(lock, &old_value, new_value);
+            bool got_the_lock = atomic_compare_exchange_strong(lock, &expected_value, new_value);
             if (!got_the_lock) {
                 // release locks got until now
                 release_write_lock(shared, tx, i);

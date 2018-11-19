@@ -421,8 +421,8 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
         return false;
     }
 
-    int former_vclock = atomic_fetch_add(&(((struct region*)shared)->VClock), 1);
-    int vw = former_vclock + 1;
+    unsigned int former_vclock = atomic_fetch_add(&(((struct region*)shared)->VClock), 1);
+    unsigned int vw = former_vclock + 1;
 
     ((struct transaction*)tx)->vw = vw;
 

@@ -119,7 +119,6 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // Allocate the region
     struct region* region = (struct region*) malloc(sizeof(struct region));
     if (unlikely(!region)) { // means that the proposition: !region is likely false
-     
         return invalid_shared;
     }
 
@@ -127,21 +126,14 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // Also satisfy alignment requirement of 'struct link'
     size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align;
 
- 
-
     // Allocate the first segment of the region
     if (unlikely(posix_memalign(&(region->start), align_alloc, size) != 0)) {
-     
         free_ptr(region);
-        // free(region);
-        // region = NULL;
         return invalid_shared;
     }
 
     // Fill the first segment of the region with 0s
- 
     memset(region->start, 0, size);
- 
 
     atomic_init(&(region->size), size);
     atomic_init(&(region->align), align);
@@ -161,7 +153,9 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
         atomic_init(&(version_locks[i]), 0u);
     }
     region->version_locks = version_locks;
- 
+    
+    printf("Region %p created\n", (void*)region);
+
     return region;    
 }
 
@@ -173,7 +167,6 @@ void tm_destroy(shared_t shared as(unused)) {
     free_ptr(reg->start);
     free_ptr((void*)(reg->version_locks));
     free_ptr(shared);
- 
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -208,10 +201,12 @@ size_t tm_align(shared_t shared as(unused)) {
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
 tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
+    printf("tm_begin\n");
     unsigned int global_clock = atomic_load(&(((struct region*)shared)->VClock));
  
     struct transaction* trans = (struct transaction*) malloc(sizeof(struct transaction));
     if (unlikely(!trans)) {
+        printf("tm_begin failed\n");
         return invalid_tx;
     }
 
@@ -224,6 +219,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
     shared_memory_state* memory_state = (shared_memory_state*) calloc(number_of_items, sizeof(shared_memory_state));
     if (unlikely(!memory_state)) {
         free_ptr(trans);
+        printf("tm_begin failed\n");
         return invalid_tx;
     }
 
@@ -232,6 +228,8 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
         memory_state[i].new_val = NULL;
     }
     trans->memory_state = memory_state;
+
+    printf("transaction %p begins\n", (void*)trans);
     return (tx_t)trans;
 }
 
@@ -241,6 +239,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
+    printf("tm_end, tx: %p, shared: %p\n", (void*)tx, (void*)shared);
     // if (((struct transaction*)tx)->is_ro) {
     //     free_transaction(tx);
     //     return true;
@@ -248,11 +247,13 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
     bool validated = tm_validate(shared, tx);
     if (!validated) {
         free_transaction(tx);
+        printf("tm_end fail, tx: %p, shared: %p\n", (void*)tx, (void*)shared);
         return false;
     }
     // Propage writes to shared memory and release write locks
     propagate_writes(shared, tx);
     free_transaction(tx);
+    printf("tm_end succeeded?: %d, tx: %p, shared: %p\n", validated, (void*)tx, (void*)shared);
     return validated;
 }
 
@@ -315,9 +316,11 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
+    printf("tm_read, tx: %p, source: %p\n", (void*)tx, (void*)source);
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         free_transaction(tx);
+        printf("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
         return false;
     }
     size_t start_index = get_start_index(shared, source);
@@ -336,6 +339,8 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
             memcpy(current_trgt_slot, current_src_slot, alignment);
             // Check lock and timestamp
         }
+        // Add this location into the read-set
+        memory_state->read = true;
         // You may want to replace char* by uintptr_t
         current_src_slot = alignment + (char*)current_src_slot;
         current_trgt_slot = alignment + (char*)current_trgt_slot;
@@ -344,9 +349,10 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     // validate the read => has to appear atomic
     if (!validate_after_read(shared, tx, source, start_index, number_of_items)) {
         free_transaction(tx);
+        printf("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
         return false;
     }
-
+    printf("tm_read success, tx: %p, source: %p\n", (void*)tx, (void*)source);
     return true;
 }
 
@@ -359,9 +365,11 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
  * @return Whether the whole transaction can continue
 **/
 bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
+    printf("tm_write, tx: %p, target: %p\n", (void*)tx, (void*)target);
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         free_transaction(tx);
+        printf("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
         return false;
     }
 
@@ -376,13 +384,14 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             memory_state->new_val = malloc(alignment);
             if (unlikely(!(memory_state->new_val))) {
                 free_transaction(tx);
+                printf("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
                 return false;
             }
             memcpy(memory_state->new_val, current_src_slot, alignment);
         }
         current_src_slot = alignment + (const char*)current_src_slot;
     }
-
+    printf("tm_write success, tx: %p, target: %p\n", (void*)tx, (void*)target);
     return true;
 }
 

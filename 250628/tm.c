@@ -155,7 +155,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     }
     region->version_locks = version_locks;
     
-    printf("Region %p created\n", (void*)region);
+    // printf ("Region %p created\n", (void*)region);
 
     return region;    
 }
@@ -206,7 +206,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
  
     struct transaction* trans = (struct transaction*) malloc(sizeof(struct transaction));
     if (unlikely(!trans)) {
-        printf("tm_begin failed\n");
+        // printf ("tm_begin failed\n");
         return invalid_tx;
     }
 
@@ -219,7 +219,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
     shared_memory_state* memory_state = (shared_memory_state*) calloc(number_of_items, sizeof(shared_memory_state));
     if (unlikely(!memory_state)) {
         free_ptr(trans);
-        printf("tm_begin failed\n");
+        // printf ("tm_begin failed\n");
         return invalid_tx;
     }
 
@@ -229,7 +229,7 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
     }
     trans->memory_state = memory_state;
 
-    printf("transaction %p begins\n", (void*)trans);
+    // printf ("transaction %p begins\n", (void*)trans);
     return (tx_t)trans;
 }
 
@@ -246,13 +246,13 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
     bool validated = tm_validate(shared, tx);
     if (!validated) {
         free_transaction(tx);
-        printf("tm_end fail, tx: %p, shared: %p\n", (void*)tx, (void*)shared);
+        // printf ("tm_end fail, tx: %p, shared: %p\n", (void*)tx, (void*)shared);
         return false;
     }
     // Propage writes to shared memory and release write locks
     propagate_writes(shared, tx);
     free_transaction(tx);
-    printf("tm_end succeeded?: %d, tx: %p, shared: %p\n", validated, (void*)tx, (void*)shared);
+    // printf ("tm_end succeeded?: %d, tx: %p, shared: %p\n", validated, (void*)tx, (void*)shared);
     return validated;
 }
 
@@ -288,7 +288,7 @@ unsigned int extract_version(unsigned int versioned_lock) {
 
 bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items, unsigned int* locks_before_reading) {
     if (shared == NULL || (void*)tx == NULL || source == NULL || locks_before_reading == NULL) {
-        printf("validate_after_read fail\n");
+        // printf ("validate_after_read fail\n");
         return false;
     }
     assert(sizeof(locks_before_reading)/sizeof(unsigned int*) == nb_items);
@@ -299,17 +299,17 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
         unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[lock_index]));
         bool locked = is_locked(v_l);
         if (locked) {
-            printf("validate_after_read fail\n");
+            // printf ("validate_after_read fail\n");
             return false;
         }
         unsigned int before_read_version = extract_version(before_read_lock);
         unsigned int version = extract_version(v_l);
         if (before_read_version != version || version > ((struct transaction*)tx)->rv) {
-            printf("validate_after_read fail\n");
+            // printf ("validate_after_read fail\n");
             return false;
         }
     }
-    printf("validate_after_read success\n");
+    // printf ("validate_after_read success\n");
     return true;
 }
 
@@ -325,7 +325,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         free_transaction(tx);
-        printf("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
+        // printf ("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
         return false;
     }
     size_t start_index = get_start_index(shared, source);
@@ -366,10 +366,10 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     // validate the read => has to appear atomic
     if (!validate_after_read(shared, tx, source, start_index, number_of_items, locks_before_reading)) {
         free_transaction(tx);
-        printf("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
+        // printf ("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
         return false;
     }
-    printf("tm_read success, tx: %p, source: %p\n", (void*)tx, (void*)source);
+    // printf ("tm_read success, tx: %p, source: %p\n", (void*)tx, (void*)source);
     return true;
 }
 
@@ -385,7 +385,7 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     size_t alignment = tm_align(shared);
     if (size % alignment != 0) {
         free_transaction(tx);
-        printf("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
+        // printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
         return false;
     }
 
@@ -400,14 +400,14 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             memory_state->new_val = malloc(alignment);
             if (unlikely(!(memory_state->new_val))) {
                 free_transaction(tx);
-                printf("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
+                // printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
                 return false;
             }
             memcpy(memory_state->new_val, current_src_slot, alignment);
         }
         current_src_slot = alignment + (const char*)current_src_slot;
     }
-    printf("tm_write success, tx: %p, target: %p\n", (void*)tx, (void*)target);
+    // printf ("tm_write success, tx: %p, target: %p\n", (void*)tx, (void*)target);
     return true;
 }
 

@@ -336,6 +336,10 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     void* current_trgt_slot = target;
 
     unsigned int* locks_before_reading = (unsigned int*) calloc(number_of_items, sizeof(unsigned int));
+    if (unlikely(!locks_before_reading)) {
+        free_transaction(tx);
+        return false;
+    }
     for (size_t i = 0; i < number_of_items; i++) {
         size_t lock_index = start_index + i;
         atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[lock_index]);

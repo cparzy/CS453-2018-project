@@ -430,13 +430,13 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
     size_t alignment = tm_align(shared);
     size_t nb_items = get_nb_items(size, alignment);
 
-    // if (((struct transaction*)tx)->rv + 1 != vw) {
+    if (((struct transaction*)tx)->rv + 1 != vw) {
         // Validate read-set
         if (!validate_read_set(shared, tx, nb_items)) {
             release_write_lock(shared, tx, nb_items);
             return false;
         }
-    // } 
+    } 
 
     return true;
 }

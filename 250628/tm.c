@@ -82,7 +82,7 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
 
 bool tm_validate(shared_t shared as(unused), tx_t tx as(unused));
 
-bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items);
+bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items, unsigned int* locks_before_reading);
 size_t get_nb_items(size_t size, size_t alignment);
 
 size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused));
@@ -286,21 +286,25 @@ unsigned int extract_version(unsigned int versioned_lock) {
     return versioned_lock & extract_version_mask;
 }
 
-bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items) {
-    if (shared == NULL || (void*)tx == NULL || source == NULL) {
+bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items, unsigned int* locks_before_reading) {
+    if (shared == NULL || (void*)tx == NULL || source == NULL || locks_before_reading == NULL) {
         printf("validate_after_read fail\n");
         return false;
     }
- 
-    for (size_t i = start_index; i < start_index + nb_items; i++) {
-        unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[i]));
+    assert(sizeof(locks_before_reading)/sizeof(unsigned int*) == nb_items);
+    for (size_t i = 0; i < nb_items; i++) {
+        unsigned int before_read_lock = locks_before_reading[i];
+        assert(!is_locked(before_read_lock));
+        size_t lock_index = i + start_index;
+        unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[lock_index]));
         bool locked = is_locked(v_l);
         if (locked) {
             printf("validate_after_read fail\n");
             return false;
         }
+        unsigned int before_read_version = extract_version(before_read_lock);
         unsigned int version = extract_version(v_l);
-        if (version > ((struct transaction*)tx)->rv) {
+        if (before_read_version != version || version > ((struct transaction*)tx)->rv) {
             printf("validate_after_read fail\n");
             return false;
         }
@@ -330,6 +334,18 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
  
     const void* current_src_slot = source;
     void* current_trgt_slot = target;
+
+    unsigned int* locks_before_reading = (unsigned int*) calloc(number_of_items, sizeof(unsigned int));
+    for (size_t i = 0; i < number_of_items; i++) {
+        size_t lock_index = start_index + i;
+        atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[lock_index]);
+        locks_before_reading[i] = atomic_load(ith_version_lock);
+        if (is_locked(locks_before_reading[i])) {
+            free(locks_before_reading);
+            free_transaction(tx);
+            return false;
+        }
+    } 
  
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
         shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
@@ -348,7 +364,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     }
 
     // validate the read => has to appear atomic
-    if (!validate_after_read(shared, tx, source, start_index, number_of_items)) {
+    if (!validate_after_read(shared, tx, source, start_index, number_of_items, locks_before_reading)) {
         free_transaction(tx);
         printf("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
         return false;

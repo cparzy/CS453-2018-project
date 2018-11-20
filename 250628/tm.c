@@ -355,8 +355,9 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     for (size_t i = 0; i < number_of_items; i++) {
         size_t lock_index = start_index + i;
         atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[lock_index]);
-        locks_before_reading[i] = atomic_load(ith_version_lock);
-        if (is_locked(locks_before_reading[i])) {
+        unsigned int ith_lock = atomic_load(ith_version_lock);
+        locks_before_reading[i] = ith_lock;
+        if (is_locked(ith_lock) || extract_version(ith_lock) > ((struct transaction*)tx)->rv) {
             free(locks_before_reading);
             free_transaction(tx, shared);
             return false;

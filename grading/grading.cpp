@@ -28,10 +28,12 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <random>
 #include <thread>
 extern "C" {
@@ -146,6 +148,30 @@ protected:
 
 // -------------------------------------------------------------------------- //
 
+/** Run some function for some bounded time, throws 'Exception::TooSlow' on overtime.
+ * @param dur  Maximum execution duration
+ * @param func Function to run (void -> void)
+**/
+template<class Rep, class Period, class Func> static void bounded_run(::std::chrono::duration<Rep, Period> const& dur, Func&& func) {
+    ::std::mutex lock;
+    ::std::unique_lock<decltype(lock)> guard{lock};
+    ::std::condition_variable cv;
+    ::std::thread runner{[&]() {
+        func();
+        { // Notify master
+            ::std::unique_lock<decltype(lock)> guard{lock};
+            cv.notify_all();
+        }
+    }};
+    if (cv.wait_for(guard, dur) != std::cv_status::no_timeout) {
+        runner.detach();
+        throw Exception::TooSlow{};
+    }
+    runner.join();
+}
+
+// -------------------------------------------------------------------------- //
+
 /** Transactional library management class.
 **/
 class TransactionalLibrary final: private NonCopyable {
@@ -229,6 +255,9 @@ public:
 **/
 class TransactionalMemory final: private NonCopyable {
 private:
+    constexpr static ::std::chrono::milliseconds max_init_time{500};   // Maximum waiting time for initialization (in ms)
+    constexpr static ::std::chrono::milliseconds max_clean_time{2500}; // Maximum waiting time for clean-up(in ms)
+private:
     /** Check whether the given alignment is a power of 2
     **/
     constexpr static bool is_power_of_two(size_t align) noexcept {
@@ -256,17 +285,19 @@ public:
     TransactionalMemory(TransactionalLibrary const& library, size_t align, size_t size): tl{library}, start_size{size}, alignment{align} {
         if (unlikely(assert_mode && (!is_power_of_two(align) || size % align != 0)))
             throw Exception::TransactionAlign{};
-        { // Initialize shared memory region
+        bounded_run(max_init_time, [&]() {
             shared = tl.tm_create(size, align);
             if (unlikely(shared == STM::invalid_shared))
                 throw Exception::TransactionCreate{};
             start_addr = tl.tm_start(shared);
-        }
+        });
     }
     /** Unbind destructor.
     **/
     ~TransactionalMemory() noexcept {
-        tl.tm_destroy(shared);
+        bounded_run(max_clean_time, [&]() {
+            tl.tm_destroy(shared);
+        });
     }
 public:
     /** [thread-safe] Return the start address of the first shared segment.
@@ -687,6 +718,8 @@ using Seed = ::std::uint_fast32_t;
 **/
 class Workload {
 protected:
+    constexpr static ::std::chrono::milliseconds max_init_time{500}; // Maximum waiting time for initialization (in ms)
+protected:
     TransactionalLibrary const& tl;  // Associated transactional library
     TransactionalMemory         tm;  // Built transactional memory to use
 public:
@@ -784,18 +817,20 @@ public:
      * @param prob_alloc    Probability of running an allocation/deallocation transaction, knowing a long transaction won't run
     **/
     Bank(TransactionalLibrary const& library, size_t nbtxperwrk, size_t nbaccounts, size_t expnbaccounts, Balance init_balance, float prob_long, float prob_alloc): Workload{library, AccountSegment::align(), AccountSegment::size(nbaccounts)}, nbtxperwrk{nbtxperwrk}, nbaccounts{nbaccounts}, expnbaccounts{expnbaccounts}, init_balance{init_balance}, prob_long{prob_long}, prob_alloc{prob_alloc} {
-        do {
-            try {
-                Transaction tx{tm, Transaction::read_write};
-                AccountSegment segment{tx, tm.get_start()};
-                segment.count = nbaccounts;
-                for (size_t i = 0; i < nbaccounts; ++i)
-                    segment.accounts[i] = init_balance;
-                break;
-            } catch (Exception::TransactionRetry const&) {
-                continue;
-            }
-        } while (true);
+        bounded_run(max_init_time, [&]() {
+            do {
+                try {
+                    Transaction tx{tm, Transaction::read_write};
+                    AccountSegment segment{tx, tm.get_start()};
+                    segment.count = nbaccounts;
+                    for (size_t i = 0; i < nbaccounts; ++i)
+                        segment.accounts[i] = init_balance;
+                    break;
+                } catch (Exception::TransactionRetry const&) {
+                    continue;
+                }
+            } while (true);
+        });
     }
 private:
     /** Long read-only transaction, summing the balance of each account.
@@ -1027,7 +1062,7 @@ public:
     }
 };
 
-/** Pause execution.
+/** Pause execution for a "short" period of time.
 **/
 static void pause() {
 #if (defined(__i386__) || defined(__x86_64__)) && defined(USE_MM_PAUSE)
@@ -1037,7 +1072,7 @@ static void pause() {
 #endif
 }
 
-/** Pause execution for a longer time.
+/** Pause execution for a "longer" period of time.
 **/
 static void long_pause() {
     ::std::this_thread::sleep_for(::std::chrono::milliseconds(200));

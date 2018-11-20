@@ -72,8 +72,6 @@
 
 #define BYTE_SIZE 8
 
-static int abort_nb = 0;
-
 void free_ptr(void* ptr);
 
 bool lock_write_set(shared_t shared, tx_t tx);
@@ -169,7 +167,6 @@ void tm_destroy(shared_t shared as(unused)) {
     free_ptr(reg->start);
     free_ptr((void*)(reg->version_locks));
     free_ptr(shared);
-    printf("abort nb: %d\n", abort_nb);
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -273,7 +270,6 @@ void free_transaction(tx_t tx, shared_t shared) {
     }
     free_ptr((void*)(((struct transaction*)tx)->memory_state));
     free_ptr((void*)tx);
-    abort_nb++;
 }
 
 size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused)) {

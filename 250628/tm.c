@@ -501,12 +501,17 @@ bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t nu
     }
     for (size_t i = 0; i < number_of_items; i++) {
         // If is read-set
-        if (((struct transaction*)tx)->memory_state[i].read) {
+        shared_memory_state* ith_memory = &(((struct transaction*)tx)->memory_state[i]);
+        if (ith_memory->read) {
             // version_lock* curr_version_lock = &(((struct region*)shared)->version_locks[i]);
             unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[i]));
             bool locked = is_locked(v_l);
             unsigned int version = extract_version(v_l);
-            if (locked && version > ((struct transaction*)tx)->rv) {
+            // if it is not in the write-set but it is locked
+            if (ith_memory->new_val == NULL && locked) {
+                return false;
+            }
+            if (version > ((struct transaction*)tx)->rv) {
                 return false;
             }
         }

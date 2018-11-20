@@ -303,10 +303,10 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
         // printf ("validate_after_read fail\n");
         return false;
     }
-    assert(sizeof(locks_before_reading)/sizeof(unsigned int*) == nb_items);
+    // assert(sizeof(locks_before_reading)/sizeof(unsigned int*) == nb_items);
     for (size_t i = 0; i < nb_items; i++) {
         unsigned int before_read_lock = locks_before_reading[i];
-        assert(!is_locked(before_read_lock));
+       // assert(!is_locked(before_read_lock));
         size_t lock_index = i + start_index;
         unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[lock_index]));
         bool locked = is_locked(v_l);
@@ -467,7 +467,7 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t n
         shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
         if (ith_memory_state->new_val != NULL) {
             unsigned int current_value = atomic_load(&(((struct region*)shared)->version_locks[i]));
-            assert(is_locked(current_value));
+           // assert(is_locked(current_value));
             unsigned int unlock_mask = ~(0u) >> 1;
             unsigned int new_value = current_value & unlock_mask;
             atomic_store(&(((struct region*)shared)->version_locks[i]), new_value);
@@ -491,7 +491,7 @@ void propagate_writes(shared_t shared as(unused), tx_t tx as(unused)) {
             memcpy(target_pointer, ith_memory_state->new_val, alignment);
             // get the versioned-lock
             atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[i]);
-            assert(is_locked(atomic_load(ith_version_lock)));
+           // assert(is_locked(atomic_load(ith_version_lock)));
             // set version value to the write-version and release the lock
             unsigned int unlock_mask = ~(0u) >> 1;
             unsigned int new_value = ((struct transaction*)tx)->vw & unlock_mask;

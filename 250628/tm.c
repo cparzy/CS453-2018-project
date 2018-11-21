@@ -564,10 +564,16 @@ unsigned long set_read_version(unsigned long versioned_lock, unsigned int new_re
 
 unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int write_version, bool locked)
 {
+    printf("read_version: %u\n", read_version);
+    printf("write_version: %u\n", write_version);
+    printf("locked: %d\n", locked);
+    printf("sizeof(unsigned long): %zu\n", (sizeof(unsigned long)));
     unsigned long new_lock = (unsigned long)read_version; // 0000rrrr
+    printf("long read_v: %lu\n", new_lock);
     unsigned long write_version_to_be_added = (unsigned long)write_version; // 0000wwww
     write_version_to_be_added = write_version_to_be_added << ((sizeof(unsigned long) * BYTE_SIZE) / 2); // wwww0000
     new_lock = new_lock | write_version; // wwwwrrrr
+    printf("long rw: %lu\n", new_lock);
 
     if (locked) {
         unsigned long lock_bit_mask = lock_bit_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
@@ -576,7 +582,7 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
         unsigned long lock_bit_mask = lock_bit_mask = ~(1ul) >> 1; //01111111
         new_lock = new_lock & lock_bit_mask; // 0wwwrrrr
     }
-
+    printf("after lock: %lu\n", new_lock);
     assert(extract_read_version(new_lock) == read_version);
     printf("extract_write_version: %u\n", extract_write_version(new_lock));
     printf("write_version: %u\n", write_version);

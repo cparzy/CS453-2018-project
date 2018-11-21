@@ -209,7 +209,9 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
         void* ith_segment = malloc(align);
         memcpy(ith_segment, src, align);
         unsigned long ith_version_lock = atomic_load(&(reg->v_locks[i]));
-        versions[i] = (segment_version) { .segment = ith_segment, .version_lock = 0, .next = NULL };
+        versions[i] = (segment_version) {
+            .segment = ith_segment, .version_lock = 0, .next = NULL
+        };
         atomic_store(&(versions[i].version_lock), ith_version_lock);
         src = align + (char*)src;
     }
@@ -576,7 +578,7 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
 
     if (locked) {
         unsigned long lock_bit_mask = lock_bit_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
-                                      new_lock = new_lock | lock_bit_mask; // 1wwwrrrr
+        new_lock = new_lock | lock_bit_mask; // 1wwwrrrr
     } else {
         unsigned long lock_bit_mask = lock_bit_mask = ~(1ul) >> 1; //01111111
         new_lock = new_lock & lock_bit_mask; // 0wwwrrrr

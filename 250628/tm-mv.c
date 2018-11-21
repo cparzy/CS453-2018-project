@@ -75,7 +75,7 @@
 // TODO: fill headers
 
 typedef struct {
-    unsigned long version_lock;
+    atomic_ulong version_lock;
     void* segment;
     segment_version* next;
 } segment_version;
@@ -158,7 +158,8 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
         void* ith_segment = malloc(align);
         memcpy(ith_segment, src, align);
         unsigned long ith_version_lock = atomic_load(&(region->v_locks[i]));
-        versions[i] = { .segment = ith_segment, .version_lock = ith_version_lock, .next = NULL };
+        versions[i] = { .segment = ith_segment, .version_lock = 0, .next = NULL };
+        atomic_store(&(versions[i].version_lock), ith_version_lock);
         src = align + (char*)src;
     }
     region->versions = versions;
@@ -239,7 +240,8 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
 
     tx->is_ro = is_ro;
 
-    unsigned int timestamp = atomic_load(&(((struct region*)shared)->VClock));
+    unsigned int former_timestamp = atomic_fetch_add(&(((struct region*)shared)->VClock), 1);
+    unsigned int timestamp = former_timestamp + 1;
     tx->timestamp = timestamp;
 
     if (!tx->is_ro) {
@@ -408,13 +410,19 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             assert(ith_version != NULL);
             segment_version* curr = ith_version;
             // Find the correct version to read
-            while (curr->next != NULL && tx_timestamp < extract_write_version(curr->version_lock)) {
+            while (curr->next != NULL && tx_timestamp < extract_write_version(atomic_load(&(curr->version_lock)))) {
                 curr = curr->next;
             }
             assert(curr != NULL);
-            assert(curr >= extract_write_version(curr->version_lock));
+            assert(curr >= extract_write_version(version_lock));
             // curr contains the more recent version that can be read by our transaction
             memcpy(current_target, curr->segment, alignment);
+            unsigned long version_lock = atomic_load(&(curr->version_lock));
+            // update the read-version of the segment if segment read-version < tx read-version
+            if (extract_read_version(version_lock) < tx_timestamp) {
+                unsigned long new_version_lock = set_read_version(version_lock, tx_timestamp);
+                atomic_store(&(curr->version_lock), new_version_lock);
+            }
         }
         current_target = alignment + (char*)current_target;
     }
@@ -430,34 +438,43 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
  * @param target Target start address (in the shared region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused)) {
-    assert(!((struct transaction*)tx)->is_ro);
+bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
+    assert(!((transaction*)tx)->is_ro);
     size_t alignment = tm_align(shared);
-    if (size % alignment != 0) {
-        free_transaction(tx, shared);
-        // printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
-        return false;
-    }
-
+    assert(size % alignment == 0);
     size_t start_index = get_start_index(shared, target);
-    size_t number_of_items = get_nb_items(size, alignment);
+    size_t nb_items = get_nb_items(size, alignment);
+    
+    write_set* tx_writes = ((transaction*)tx)->writes;
+    unsigned int tx_timestamp = ((transaction*)tx)->timestamp;
+    segment_version* versions = ((region*)shared)->versions;
+
     const void* current_src_slot = source;
-    for (size_t i = start_index; i < start_index + number_of_items; i++) {
-        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
-        if (memory_state->new_val != NULL) {
-            memcpy(memory_state->new_val, current_src_slot, alignment);
+    for (size_t i = 0; i < nb_items; i++) {
+        size_t segment_index = start_index + i;
+        segment_version* segment_version = &(versions[segment_index]);
+        unsigned long segment_version_lock = atomic_load(&(segment_version->version_lock));
+        if (is_locked(segment_version_lock) 
+            || extract_read_version(segment_version_lock) > tx_timestamp 
+            || extract_write_version(segment_version_lock) > tx_timestamp) { // not sure about the write timestamp
+            free_transaction(tx, shared);
+            return false;
+        }
+        write_set* written_val = &(tx_writes[segment_index]);
+        if (written_val->new_val != NULL) {
+            memcpy(written_val->new_val, current_src_slot, alignment);
         } else {
-            memory_state->new_val = malloc(alignment);
-            if (unlikely(!(memory_state->new_val))) {
+            void* new_val = malloc(alignment);
+            if (unlikely(!new_val)) {
                 free_transaction(tx, shared);
-                // printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
                 return false;
             }
-            memcpy(memory_state->new_val, current_src_slot, alignment);
+            memcpy(new_val, current_src_slot, alignment);
+            written_val->new_val = new_val;
         }
-        current_src_slot = alignment + (const char*)current_src_slot;
+        current_src_slot = alignment + (char*)current_src_slot;
     }
-    // printf ("tm_write success, tx: %p, target: %p\n", (void*)tx, (void*)target);
+
     return true;
 }
 

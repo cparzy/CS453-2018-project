@@ -268,31 +268,167 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
-    return false;
+    if (((transaction*)tx)->is_ro) {
+        free_transaction(tx, shared);
+        return true;
+    }
+
+    if (!lock_write_set(tx, shared)) {
+        free_transaction(tx, shared);
+        return false;
+    }
+
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    size_t nb_items = get_nb_items(size, alignment);
+
+    if (!tm_validate(shared, tx)) {
+        release_write_locks(shared, tx, nb_items);
+        free_transaction(tx, shared);
+        return false;
+    }
+
+    propagate_writes(shared, tx);
+    release_write_locks(shared, tx, nb_items);
+    free_transaction(tx, shared);
+    return true;
 }
 
-// /** [thread-safe] End the given transaction.
-//  * @param shared Shared memory region associated with the transaction
-//  * @param tx     Transaction to end
-//  * @return Whether the whole transaction committed
-// **/
-// bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
-//     if (((struct transaction*)tx)->is_ro) {
-//         free_transaction(tx, shared);
-//         return true;
-//     }
-//     bool validated = tm_validate(shared, tx);
-//     if (!validated) {
-//         free_transaction(tx, shared);
-//         // printf ("tm_end fail, tx: %p, shared: %p\n", (void*)tx, (void*)shared);
-//         return false;
-//     }
-//     // Propage writes to shared memory and release write locks
-//     propagate_writes(shared, tx);
-//     free_transaction(tx, shared);
-//     // printf ("tm_end succeeded?: %d, tx: %p, shared: %p\n", validated, (void*)tx, (void*)shared);
-//     return validated;
-// }
+bool lock_write_set(tx_t tx, shared_t shared) {
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    assert(size % alignment == 0);
+    size_t nb_items = get_nb_items(size, alignment);
+    unsigned int trasaction_timestamp = ((transaction*)tx)->timestamp;
+    write_set* writes = ((transaction*)tx)->writes;
+    atomic_ulong* v_locks = ((region*)shared)->v_locks;
+    for (size_t i = 0; i < nb_items; i++) {
+        write_set* ith_write = &(writes[i]);
+        // if in write-set
+        if (ith_write->new_val != NULL) {
+            // try to acquire the lock on this segment
+            atomic_ulong* ith_v_lock = &(v_locks[i]);
+            unsigned long old_value = atomic_load(ith_v_lock);
+
+            // compute the expected value
+            unsigned long unlock_mask = ~(0ul) >> 1;
+            unsigned long expected_value = old_value & unlock_mask;
+
+            // compute the new value
+            unsigned long lock_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1);
+            unsigned long new_value = old_value | lock_mask;
+            bool got_the_lock = atomic_compare_exchange_strong(ith_v_lock, &expected_value, new_value);
+            if (!got_the_lock) {
+                // release all the locks acquired until now
+                release_write_locks(shared, tx, i);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// When this function is called, we have all the write locks until index 'until' of the segments in the write set
+// It will release the nb_items first locks
+// If you want to release all locks, nb_items should be equals to the total number of items (size / alignment)
+void release_write_locks(shared_t shared, tx_t tx, size_t until) {
+    size_t size = tm_size(shared);
+    assert(until <= size);
+
+    atomic_ulong* v_locks = ((region*)shared)->v_locks;
+    write_set* writes = ((transaction*)tx)->writes;
+    for (size_t i = 0; i < until; i++) {
+        write_set* ith_write = &(writes[i]);
+        if (ith_write->new_val != NULL) {
+            atomic_ulong* ith_v_lock = &(v_locks[i]);
+            unsigned long old_value = atomic_load(ith_v_lock);
+            assert(is_locked(old_value));
+            unsigned long unlock_mask = ~(0ul) >> 1;
+            unsigned long new_value = old_value & unlock_mask;
+            atomic_store(ith_v_lock, new_value);
+        }
+    }
+}
+
+bool tm_validate(shared_t shared, tx_t tx) {
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    size_t nb_items = get_nb_items(size, alignment);
+    atomic_ulong* v_locks = ((region*)shared)->v_locks;
+    write_set* writes = ((transaction*)tx)->writes;
+    unsigned int tx_timestamp = ((transaction*)tx)->timestamp;
+    for (size_t i = 0; i < nb_items; i++) {
+        write_set* ith_write = &(writes[i]);
+        // if in write-set
+        if (ith_write->new_val != NULL) {
+            atomic_ulong* ith_v_lock = &(v_locks[i]);
+            unsigned long lock_value = atomic_load(ith_v_lock);
+            assert(is_lock(lock_value));
+            if (extract_read_version(lock_value) > tx_timestamp || extract_write_version(lock_value) > tx_timestamp) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void propagate_writes(shared_t shared, tx_t tx) {
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    size_t nb_items = get_nb_items(size, alignment);
+
+    atomic_ulong* v_locks = ((region*)shared)->v_locks;
+    void* start = tm_start(shared);
+    segment_version* versions = ((region*)shared)->versions;
+
+    write_set* writes = ((transaction*)tx)->writes;
+    unsigned int tx_timestamp = ((transaction*)tx)->timestamp;
+
+    for (size_t i = 0; i < nb_items; i++) {
+        write_set* ith_write = &(writes[i]);
+        if (ith_write->new_val != NULL) {
+            // point to the correct location in shared memory
+            atomic_ulong* ith_v_lock = &(v_locks[i]);
+            unsigned long version = atomic_load(ith_v_lock);
+            assert(is_locked(version));
+
+            // point to the correct segment of shared memory
+            void* target_segment = (i * alignment) + (char*)start;
+
+            // create a new segment_version storing the old version of the segment
+            // (to make it available for reads)
+            segment_version* s_version = (segment_version*) malloc(sizeof(segment_version));
+            void* segment = malloc(alignment);
+            memcpy(segment, target_segment, alignment);
+            s_version->segment = segment;
+            unsigned long unlock_mask = ~(0ul) >> 1;
+            atomic_init(&(s_version->version_lock), version & unlock_mask);
+
+            // insert this newly created segment_version into the appropriate linked-list, at the correct position
+            segment_version* ith_version = &(versions[i]);
+            segment_version* prev = NULL;
+            segment_version* next = ith_version;
+            while (next != NULL && atomic_load(&(next->version_lock)) > version) {
+                prev = next;
+                next = next->next;
+            }
+            if (prev == NULL) {
+                assert(next != NULL && atomic_load(&(next->version_lock)) <= version);
+                s_version->next = next;
+                versions[i] = s_version;
+            } else {
+                assert(atomic_load(&(prev->version_lock)) > version);
+                assert(next == NULL || atomic_load(&(next->version_lock)) <= version);
+                prev->next = s_version;
+                s_version->next = NULL;
+            }
+
+            // write to the shared memory and update the version
+            memcpy(target_segment, ith_write->new_val, alignment);
+            atomic_store(ith_v_lock, create_new_versioned_lock(tx_timestamp, tx_timestamp, true));
+        }
+    }
+}
 
 void free_transaction(tx_t tx, shared_t shared) {
     if ((void*)tx == NULL) {
@@ -475,125 +611,6 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         current_src_slot = alignment + (char*)current_src_slot;
     }
 
-    return true;
-}
-
-bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
-    // lock the write-set
-    if (!lock_write_set(shared, tx)) {
-        return false;
-    }
-
-    unsigned int former_vclock = atomic_fetch_add(&(((struct region*)shared)->VClock), 1);
-    unsigned int vw = former_vclock + 1;
-
-    ((struct transaction*)tx)->vw = vw;
-
-    size_t size = tm_size(shared);
-    size_t alignment = tm_align(shared);
-    size_t nb_items = get_nb_items(size, alignment);
-
-    if (((struct transaction*)tx)->rv + 1 != vw) {
-        // Validate read-set
-        if (!validate_read_set(shared, tx, nb_items)) {
-            release_write_lock(shared, tx, nb_items);
-            return false;
-        }
-    } 
-
-    return true;
-}
-
-// When this function is called, we have all the write locks
-// It will release the nb_items first locks
-// If you want to release all locks, nb_items should be equals to the total number of items (size / alignment)
-void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t nb_items) {
-    if (shared == NULL || (void*)tx == NULL) {
-        return;
-    }
-    for (size_t i = 0; i < nb_items; i++) {
-        shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
-        if (ith_memory_state->new_val != NULL) {
-            unsigned int current_value = atomic_load(&(((struct region*)shared)->version_locks[i]));
-            assert(is_locked(current_value));
-            unsigned int unlock_mask = ~(0u) >> 1;
-            unsigned int new_value = current_value & unlock_mask;
-            atomic_store(&(((struct region*)shared)->version_locks[i]), new_value);
-        }
-    }
-}
-
-void propagate_writes(shared_t shared as(unused), tx_t tx as(unused)) {
-    size_t size = tm_size(shared);
-    size_t alignment = tm_align(shared);
-    size_t nb_items = get_nb_items(size, alignment);
-    void* start = tm_start(shared);
-    for (size_t i = 0; i < nb_items; i++) {
-        // shared_memory_state ith_memory_state = ((struct transaction*)tx)->memory_state[i];
-        shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
-        // If in write-set
-        if (ith_memory_state->new_val != NULL) {
-            // point to the correct location in shared memory
-            void* target_pointer = (i * alignment) + (char*)start;
-            // copy the content written by the transaction in shared memory
-            memcpy(target_pointer, ith_memory_state->new_val, alignment);
-            // get the versioned-lock
-            atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[i]);
-            assert(is_locked(atomic_load(ith_version_lock)));
-            // set version value to the write-version and release the lock
-            unsigned int unlock_mask = ~(0u) >> 1;
-            unsigned int new_value = ((struct transaction*)tx)->vw & unlock_mask;
-            atomic_store(ith_version_lock, new_value);
-        }
-    } 
-}
-
-bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items) {
-    if (shared == NULL || (void*)tx == NULL) {
-        return false;
-    }
-    for (size_t i = 0; i < number_of_items; i++) {
-        // If is read-set
-        shared_memory_state* ith_memory = &(((struct transaction*)tx)->memory_state[i]);
-        if (ith_memory->read) {
-            // version_lock* curr_version_lock = &(((struct region*)shared)->version_locks[i]);
-            unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[i]));
-            bool locked = is_locked(v_l);
-            unsigned int version = extract_version(v_l);
-            // if it is not in the write-set but it is locked
-            if (ith_memory->new_val == NULL && locked) {
-                return false;
-            }
-            if (version > ((struct transaction*)tx)->rv) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-bool lock_write_set(shared_t shared, tx_t tx) {
-    size_t size = tm_size(shared);
-    size_t alignment = tm_align(shared);
-    size_t number_of_items = get_nb_items(size, alignment);
-    for (size_t i = 0; i < number_of_items; i++) {
-        void* val_written = ((struct transaction*)tx)->memory_state[i].new_val;
-        bool in_write_set = val_written != NULL;
-        if (in_write_set) {
-            atomic_uint* lock = &(((struct region*)shared)->version_locks[i]);
-            unsigned int lock_mask = 1 << (sizeof(unsigned int) * BYTE_SIZE - 1);
-            unsigned int old_value = atomic_load(lock);
-            unsigned int unlock_mask = ~(0u) >> 1;
-	        unsigned int expected_value = old_value & unlock_mask;
-            unsigned int new_value = old_value | lock_mask;
-            bool got_the_lock = atomic_compare_exchange_strong(lock, &expected_value, new_value);
-            if (!got_the_lock) {
-                // release locks got until now
-                release_write_lock(shared, tx, i);
-                return false;
-            }
-        }
-    }
     return true;
 }
 

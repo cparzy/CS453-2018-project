@@ -564,13 +564,6 @@ unsigned long set_read_version(unsigned long versioned_lock, unsigned int new_re
 
 unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int write_version, bool locked)
 {
-    unsigned long lock_bit_mask = 0ul;
-    if (locked) {
-        lock_bit_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
-    } else {
-        lock_bit_mask = ~(1ul) >> 1; //01111111
-    }
-
     unsigned long new_lock = (unsigned long)read_version; // 0000rrrr
     unsigned long write_version_to_be_added = (unsigned long)write_version; // 0000wwww
     write_version_to_be_added = write_version_to_be_added << ((sizeof(unsigned long) * BYTE_SIZE) / 2); // wwww0000
@@ -601,7 +594,7 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target)
 {
     size_t alignment = tm_align(shared);
-    assert(size >= 0 && size % alignment == 0);
+    assert(size % alignment == 0);
 
     unsigned int tx_timestamp = ((transaction*)tx)->timestamp;
     bool tx_is_ro = ((transaction*)tx)->is_ro;

@@ -225,8 +225,8 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items)
 {
     printf("nb_items: %zu\n", nb_items);
     printf("sizeof(versions): %zu\n", sizeof(versions));
-    printf("sizeof(versions[0])): %zu\n", sizeof(versions[0])));
-    printf("division: %zu\n", sizeof(versions) / sizeof(versions[0]));
+    printf("sizeof(versions[0])): %zu\n", sizeof(versions[0]));
+    printf("division: %zu\n", (sizeof(versions) / sizeof(versions[0])));
     assert(nb_items == sizeof(versions) / sizeof(versions[0]));
     for (size_t i = 0; i < nb_items; i++) {
         segment_version* first_version = &(versions[0]);

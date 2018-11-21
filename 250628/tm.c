@@ -571,7 +571,6 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
 
     if (locked) {
         unsigned long lock_bit_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
-        printf("lock_bit_mask: %lu\n", lock_bit_mask);
         new_lock = new_lock | lock_bit_mask; // 1wwwrrrr
     } else {
         unsigned long lock_bit_mask = ~(1ul) >> 1; //01111111

@@ -17,7 +17,7 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE   200809L
 #ifdef __STDC_NO_ATOMICS__
-    #error Current C11 compiler does not support atomic operations
+#error Current C11 compiler does not support atomic operations
 #endif
 
 // External headers
@@ -37,10 +37,10 @@
 **/
 #undef likely
 #ifdef __GNUC__
-    #define likely(prop) \
+#define likely(prop) \
         __builtin_expect((prop) ? 1 : 0, 1)
 #else
-    #define likely(prop) \
+#define likely(prop) \
         (prop)
 #endif
 
@@ -49,10 +49,10 @@
 **/
 #undef unlikely
 #ifdef __GNUC__
-    #define unlikely(prop) \
+#define unlikely(prop) \
         __builtin_expect((prop) ? 1 : 0, 0)
 #else
-    #define unlikely(prop) \
+#define unlikely(prop) \
         (prop)
 #endif
 
@@ -61,18 +61,66 @@
 **/
 #undef as
 #ifdef __GNUC__
-    #define as(type...) \
+#define as(type...) \
         __attribute__((type))
 #else
-    #define as(type...)
-    #warning This compiler has no support for GCC attributes
+#define as(type...)
+#warning This compiler has no support for GCC attributes
 #endif
 
 // -------------------------------------------------------------------------- //
 
 #define BYTE_SIZE 8
 
-// TODO: fill headers
+shared_t tm_create(size_t size as(unused), size_t align as(unused));
+
+void free_versions_linked_list(segment_version* versions, size_t nb_items);
+
+void tm_destroy(shared_t shared as(unused));
+
+void* tm_start(shared_t shared as(unused));
+
+size_t tm_size(shared_t shared as(unused));
+
+size_t tm_align(shared_t shared as(unused));
+
+tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused));
+
+bool tm_end(shared_t shared as(unused), tx_t tx as(unused));
+
+bool lock_write_set(tx_t tx, shared_t shared);
+
+void release_write_locks(shared_t shared, tx_t tx, size_t until);
+
+bool tm_validate(shared_t shared, tx_t tx);
+
+void propagate_writes(shared_t shared, tx_t tx);
+
+void free_transaction(tx_t tx, shared_t shared);
+
+size_t get_start_index(shared_t shared, void const* mem_ptr);
+
+size_t get_nb_items(size_t size, size_t alignment);
+
+bool is_locked(unsigned long versioned_lock);
+
+unsigned int extract_read_version(unsigned long versioned_lock);
+
+unsigned int extract_write_version(unsigned long versioned_lock);
+
+unsigned long set_read_version(unsigned long versioned_lock, unsigned int new_read_version);
+
+unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int write_version, bool locked);
+
+bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target);
+
+bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target);
+
+void free_ptr(void* ptr);
+
+alloc_t tm_alloc(shared_t shared as(unused), tx_t tx as(unused), size_t size as(unused), void** target as(unused));
+
+bool tm_free(shared_t shared as(unused), tx_t tx as(unused), void* target as(unused));
 
 typedef struct {
     atomic_ulong version_lock;
@@ -105,8 +153,9 @@ typedef struct {
  * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
 **/
-shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
- 
+shared_t tm_create(size_t size as(unused), size_t align as(unused))
+{
+
     // Allocate the region
     region* region = (region*) malloc(sizeof(region));
     if (unlikely(!region)) { // means that the proposition: !region is likely false
@@ -132,7 +181,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     atomic_init(&(region->VClock), 0u);
 
     size_t number_of_items = size / align;
- 
+
     // Init the array of versioned-locks
     atomic_ulong* v_locks = (atomic_ulong*) calloc(number_of_items, sizeof(atomic_ulong));
     if (unlikely(!v_locks)) {
@@ -144,7 +193,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
         atomic_init(&(v_locks[i]), 0ul);
     }
     region->v_locks = v_locks;
-    
+
     // Init the segment versions
     segment_version* versions = (segment_version*) calloc(number_of_items, sizeof(segment_version));
     if (unlikely(!versions)) {
@@ -165,10 +214,11 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     region->versions = versions;
 
     // printf ("Region %p created\n", (void*)region);
-    return region;    
+    return region;
 }
 
-void free_versions_linked_list(segment_version* versions, size_t nb_items) {
+void free_versions_linked_list(segment_version* versions, size_t nb_items)
+{
     assert(nb_items == sizeof(versions) / sizeof(segment_version));
     for (size_t i = 0; i < nb_items; i++) {
         segment_version first_version = version[0];
@@ -178,6 +228,7 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items) {
             segment_version* curr = first_version->next
             while (curr != NULL) {
                 segment_version* next_tmp = curr->next;
+                free_ptr(curr->segment);
                 free_ptr((void*)curr);
                 curr = next_tmp;
             }
@@ -190,7 +241,8 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items) {
 /** Destroy (i.e. clean-up + free) a given shared memory region.
  * @param shared Shared memory region to destroy, with no running transaction
 **/
-void tm_destroy(shared_t shared as(unused)) {
+void tm_destroy(shared_t shared as(unused))
+{
     struct region* reg = (struct region*)shared;
     size_t size = tm_size(shared);
     size_t align = tm_align(shared);
@@ -205,7 +257,8 @@ void tm_destroy(shared_t shared as(unused)) {
  * @param shared Shared memory region to query
  * @return Start address of the first allocated segment
 **/
-void* tm_start(shared_t shared as(unused)) {
+void* tm_start(shared_t shared as(unused))
+{
     return ((struct region*)shared)->start;
 }
 
@@ -213,7 +266,8 @@ void* tm_start(shared_t shared as(unused)) {
  * @param shared Shared memory region to query
  * @return First allocated segment size
 **/
-size_t tm_size(shared_t shared as(unused)) {
+size_t tm_size(shared_t shared as(unused))
+{
     size_t size = atomic_load(&(((struct region*)shared)->size));
     return size;
 }
@@ -222,7 +276,8 @@ size_t tm_size(shared_t shared as(unused)) {
  * @param shared Shared memory region to query
  * @return Alignment used globally
 **/
-size_t tm_align(shared_t shared as(unused)) {
+size_t tm_align(shared_t shared as(unused))
+{
     size_t align = atomic_load(&(((struct region*)shared)->align));
     return align;
 }
@@ -232,7 +287,8 @@ size_t tm_align(shared_t shared as(unused)) {
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
-tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
+tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused))
+{
     transaction* tx = (transaction*) malloc(sizeof(transaction));
     if (unlikely(!tx)) {
         return invalid_tx;
@@ -267,7 +323,8 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
  * @param tx     Transaction to end
  * @return Whether the whole transaction committed
 **/
-bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
+bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
+{
     if (((transaction*)tx)->is_ro) {
         free_transaction(tx, shared);
         return true;
@@ -294,7 +351,8 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused)) {
     return true;
 }
 
-bool lock_write_set(tx_t tx, shared_t shared) {
+bool lock_write_set(tx_t tx, shared_t shared)
+{
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
     assert(size % alignment == 0);
@@ -331,7 +389,8 @@ bool lock_write_set(tx_t tx, shared_t shared) {
 // When this function is called, we have all the write locks until index 'until' of the segments in the write set
 // It will release the nb_items first locks
 // If you want to release all locks, nb_items should be equals to the total number of items (size / alignment)
-void release_write_locks(shared_t shared, tx_t tx, size_t until) {
+void release_write_locks(shared_t shared, tx_t tx, size_t until)
+{
     size_t size = tm_size(shared);
     assert(until <= size);
 
@@ -350,7 +409,8 @@ void release_write_locks(shared_t shared, tx_t tx, size_t until) {
     }
 }
 
-bool tm_validate(shared_t shared, tx_t tx) {
+bool tm_validate(shared_t shared, tx_t tx)
+{
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
     size_t nb_items = get_nb_items(size, alignment);
@@ -372,7 +432,8 @@ bool tm_validate(shared_t shared, tx_t tx) {
     return true;
 }
 
-void propagate_writes(shared_t shared, tx_t tx) {
+void propagate_writes(shared_t shared, tx_t tx)
+{
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
     size_t nb_items = get_nb_items(size, alignment);
@@ -430,7 +491,8 @@ void propagate_writes(shared_t shared, tx_t tx) {
     }
 }
 
-void free_transaction(tx_t tx, shared_t shared) {
+void free_transaction(tx_t tx, shared_t shared)
+{
     if ((void*)tx == NULL) {
         return;
     }
@@ -449,38 +511,44 @@ void free_transaction(tx_t tx, shared_t shared) {
     free_ptr((void*)tx);
 }
 
-size_t get_start_index(shared_t shared, void const* mem_ptr) {
+size_t get_start_index(shared_t shared, void const* mem_ptr)
+{
     size_t alignment = tm_align(shared);
     void* start = tm_start(shared);
     size_t start_index = (mem_ptr - start) / alignment;
     return start_index;
 }
 
-size_t get_nb_items(size_t size, size_t alignment) {
+size_t get_nb_items(size_t size, size_t alignment)
+{
     size_t nb_items = size / alignment;
     return nb_items;
 }
 
-bool is_locked(unsigned long versioned_lock) {
+bool is_locked(unsigned long versioned_lock)
+{
     unsigned int is_locked_mask = 1 << (sizeof(unsigned long) * BYTE_SIZE - 1);
     return (versioned_lock & is_locked_mask) >> (sizeof(unsigned long) * BYTE_SIZE - 1);
 }
 
-unsigned int extract_read_version(unsigned long versioned_lock) {
+unsigned int extract_read_version(unsigned long versioned_lock)
+{
     // first half is the read-version
     unsigned long mask = ~(0ul) >> ((sizeof(unsigned long) * BYTE_SIZE) / 2); // 00001111
     unsigned long read_version = versioned_lock & mask;
     return (unsigned int)read_version;
 }
 
-unsigned int extract_write_version(unsigned long versioned_lock) {
+unsigned int extract_write_version(unsigned long versioned_lock)
+{
     unsigned long mask = ~(0ul) << (((sizeof(unsigned long) * BYTE_SIZE) / 2) + 1); // 11100000
     mask = mask >> 1; // 01110000
-    unsigned long write_version = (versioned_lock & mask) >> (((sizeof(unsigned long) * BYTE_SIZE) / 2);
+    unsigned long write_version = (versioned_lock & mask) >> ((sizeof(unsigned long) * BYTE_SIZE) / 2);
     return (unsigned int)write_version;
 }
 
-unsigned long set_read_version(unsigned long versioned_lock, unsigned int new_read_version) {
+unsigned long set_read_version(unsigned long versioned_lock, unsigned int new_read_version)
+{
     unsigned long mask = ~(0u) << ((sizeof(unsigned long) * BYTE_SIZE) / 2); // 11110000
     unsigned long cancelled_read_version = versioned_lock & mask; // xxxx0000
     unsigned long new_r_v = (unsigned long)new_read_version; // 0000yyyy
@@ -490,7 +558,8 @@ unsigned long set_read_version(unsigned long versioned_lock, unsigned int new_re
     return new_lock;
 }
 
-unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int write_version, bool locked) {
+unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int write_version, bool locked)
+{
     unsigned long lock_bit_mask = 0ul;
     if (locked) {
         lock_bit_mask = 1ul << ((sizeof(unsigned long) * BYTE_SIZE - 1)// 10000000;
@@ -505,7 +574,7 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
 
     if (locked) {
         unsigned long lock_bit_mask = lock_bit_mask = 1ul << ((sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
-        new_lock = new_lock | lock_bit_mask; // 1wwwrrrr
+                                      new_lock = new_lock | lock_bit_mask; // 1wwwrrrr
     } else {
         unsigned long lock_bit_mask = lock_bit_mask = ~(1ul) >> 1; //01111111
         new_lock = new_lock & lock_bit_mask; // 0wwwrrrr
@@ -525,7 +594,8 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
  * @param target Target start address (in a private region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
+bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target)
+{
     size_t alignment = tm_align(shared);
     assert(size >= 0 && size % alignment == 0);
 
@@ -574,13 +644,14 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
  * @param target Target start address (in the shared region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
+bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target)
+{
     assert(!((transaction*)tx)->is_ro);
     size_t alignment = tm_align(shared);
     assert(size % alignment == 0);
     size_t start_index = get_start_index(shared, target);
     size_t nb_items = get_nb_items(size, alignment);
-    
+
     write_set* tx_writes = ((transaction*)tx)->writes;
     unsigned int tx_timestamp = ((transaction*)tx)->timestamp;
     segment_version* versions = ((region*)shared)->versions;
@@ -590,8 +661,8 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         size_t segment_index = start_index + i;
         segment_version* segment_version = &(versions[segment_index]);
         unsigned long segment_version_lock = atomic_load(&(segment_version->version_lock));
-        if (is_locked(segment_version_lock) 
-            || extract_read_version(segment_version_lock) > tx_timestamp 
+        if (is_locked(segment_version_lock)
+            || extract_read_version(segment_version_lock) > tx_timestamp
             || extract_write_version(segment_version_lock) > tx_timestamp) { // not sure about the write timestamp
             free_transaction(tx, shared);
             return false;
@@ -614,7 +685,8 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     return true;
 }
 
-void free_ptr(void* ptr) {
+void free_ptr(void* ptr)
+{
     free(ptr);
     ptr = NULL;
 }
@@ -626,7 +698,8 @@ void free_ptr(void* ptr) {
  * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
 **/
-alloc_t tm_alloc(shared_t shared as(unused), tx_t tx as(unused), size_t size as(unused), void** target as(unused)) {
+alloc_t tm_alloc(shared_t shared as(unused), tx_t tx as(unused), size_t size as(unused), void** target as(unused))
+{
     // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
     return abort_alloc;
 }
@@ -637,7 +710,8 @@ alloc_t tm_alloc(shared_t shared as(unused), tx_t tx as(unused), size_t size as(
  * @param target Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
 **/
-bool tm_free(shared_t shared as(unused), tx_t tx as(unused), void* target as(unused)) {
+bool tm_free(shared_t shared as(unused), tx_t tx as(unused), void* target as(unused))
+{
     // TODO: tm_free(shared_t, tx_t, void*)
     return false;
 }

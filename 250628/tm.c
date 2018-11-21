@@ -223,7 +223,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
 
 void free_versions_linked_list(segment_version* versions, size_t nb_items)
 {
-    assert(nb_items == sizeof(versions) / sizeof(segment_version));
+    assert(nb_items == sizeof(versions) / sizeof(versions[0]));
     for (size_t i = 0; i < nb_items; i++) {
         segment_version* first_version = &(versions[0]);
         // segment_version next = versions[0];

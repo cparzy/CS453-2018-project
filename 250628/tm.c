@@ -573,11 +573,11 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
     unsigned long write_version_to_be_added = (unsigned long)write_version; // 0000wwww
     write_version_to_be_added = write_version_to_be_added << ((sizeof(unsigned long) * BYTE_SIZE) / 2); // wwww0000
     printf("write_v-t-b-a: %lu\n", write_version_to_be_added);
-    new_lock = new_lock | write_version; // wwwwrrrr
+    new_lock = new_lock | write_version_to_be_added; // wwwwrrrr
     printf("long rw: %lu\n", new_lock);
 
     if (locked) {
-        unsigned long lock_bit_mask = lock_bit_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
+        unsigned long lock_bit_mask = 1ul << (sizeof(unsigned long) * BYTE_SIZE - 1); // 10000000
         printf("lock_bit_mask: %lu\n", lock_bit_mask);
         new_lock = new_lock | lock_bit_mask; // 1wwwrrrr
     } else {

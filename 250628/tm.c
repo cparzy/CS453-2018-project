@@ -578,6 +578,8 @@ unsigned long create_new_versioned_lock(unsigned int read_version, unsigned int 
     }
 
     assert(extract_read_version(new_lock) == read_version);
+    printf("extract_write_version: %u\n", extract_write_version(new_lock));
+    printf("write_version: %u\n", write_version);
     assert(extract_write_version(new_lock) == write_version);
     assert(is_locked(new_lock) == locked);
     return new_lock;

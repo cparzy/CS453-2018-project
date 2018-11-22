@@ -485,10 +485,14 @@ void propagate_writes(shared_t shared, tx_t tx)
                 next = next->next;
             }
             if (prev == NULL) {
+                // in this case, next == ith_version
+                assert(next == ith_version);
                 assert(next != NULL && atomic_load(&(next->version_lock)) <= version);
-                s_version->next = next;
+                segment_version* next_copy = (segment_version*) malloc(sizeof(segment_version));
+                *next_copy = *ith_version;
+                s_version->next = next_copy;
                 versions[i] = *s_version;
-                // free_ptr((void*)s_version);
+                free_ptr((void*)s_version);
             } else {
                 assert(atomic_load(&(prev->version_lock)) > version);
                 assert(next == NULL || atomic_load(&(next->version_lock)) <= version);

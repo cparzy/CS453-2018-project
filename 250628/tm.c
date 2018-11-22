@@ -477,6 +477,7 @@ void propagate_writes(shared_t shared, tx_t tx)
 
             // insert this newly created segment_version into the appropriate linked-list, at the correct position
             segment_version* ith_version = &(versions[i]);
+            assert(ith_version != NULL);
             segment_version* prev = NULL;
             segment_version* next = ith_version;
             while (next != NULL && atomic_load(&(next->version_lock)) > version) {
@@ -487,7 +488,7 @@ void propagate_writes(shared_t shared, tx_t tx)
                 assert(next != NULL && atomic_load(&(next->version_lock)) <= version);
                 s_version->next = next;
                 versions[i] = *s_version;
-                free_ptr((void*)s_version);
+                // free_ptr((void*)s_version);
             } else {
                 assert(atomic_load(&(prev->version_lock)) > version);
                 assert(next == NULL || atomic_load(&(next->version_lock)) <= version);

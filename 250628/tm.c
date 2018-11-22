@@ -230,14 +230,10 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items)
         if (first_version->next != NULL) {
             segment_version* curr = first_version->next;
             while (curr != NULL) {
-                printf("start iteration");
                 segment_version* next_tmp = curr->next;
-                printf("s: %p\n", curr->segment);
                 free_ptr(curr->segment);
-                printf("c: %p\n", (void*)curr);
                 free_ptr((void*)curr);
                 curr = next_tmp;
-                printf("end iteration");
             }
             assert(curr == NULL);
         }

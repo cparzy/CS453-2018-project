@@ -225,6 +225,7 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items)
         segment_version* first_version = &(versions[0]);
         // segment_version next = versions[0];
         assert(first_version != NULL);
+        free_ptr(first_version->segment);
         if (first_version->next != NULL) {
             segment_version* curr = first_version->next;
             while (curr != NULL) {

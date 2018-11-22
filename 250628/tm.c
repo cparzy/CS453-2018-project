@@ -454,40 +454,50 @@ void propagate_writes(shared_t shared, tx_t tx)
             // point to the correct segment of shared memory
             void* target_segment = (i * alignment) + (char*)start;
 
-            // create a new segment_version storing the old version of the segment
-            // (to make it available for reads)
-            segment_version* s_version = (segment_version*) malloc(sizeof(segment_version));
+            // TODO: make sure this part is correct
+            // The idea is the following:
+            // You create a new version in the appropriate linked-list, containing the new value you want to write
+            // Then you add it at the correct location in the linked-list
+            // Then you write your new value into the shared memory
+            // You added the new version with a lock_version locked
+            // so in tm_read, when the lock_version is locked (by setting the lock bit to 1), you don't read it, it means that it is being added into the version
+            // So now, when committing, you also have to reset the lock bit to 0
+
+            unsigned long new_version_lock = create_new_versioned_lock(tx_timestamp, tx_timestamp, true);
+            segment_version* new_version = (segment_version*) malloc(sizeof(segment_version));
             void* segment = malloc(alignment);
-            memcpy(segment, target_segment, alignment);
-            s_version->segment = segment;
-            unsigned long unlock_mask = ~(0ul) >> 1;
-            atomic_init(&(s_version->version_lock), version & unlock_mask);
+            memcpy(segment, ith_write->new_val, alignment);
+            new_version->segment = segment;
+            atomic_init(&(new_version->version_lock), new_version_lock);
 
             // insert this newly created segment_version into the appropriate linked-list, at the correct position
             segment_version* ith_version = versions[i];
             assert(ith_version != NULL);
             segment_version* prev = NULL;
             segment_version* next = ith_version;
-            while (next != NULL && atomic_load(&(next->version_lock)) > version) {
+            while (next != NULL && extract_write_version(atomic_load(&(next->version_lock))) > extract_write_version(new_version_lock)) {
                 prev = next;
                 next = next->next;
             }
             if (prev == NULL) {
                 assert(next == ith_version);
-                assert(next != NULL && atomic_load(&(next->version_lock)) <= version);
+                assert(next != NULL && extract_write_version(atomic_load(&(next->version_lock))) <= extract_write_version(new_version_lock));
                 // in this case, next == ith_version
-                s_version->next = next;
-                versions[i] = s_version;
+                new_version->next = next;
+                versions[i] = new_version;
             } else {
-                assert(atomic_load(&(prev->version_lock)) > version);
-                assert(next == NULL || atomic_load(&(next->version_lock)) <= version);
-                prev->next = s_version;
-                s_version->next = next;
+                assert(extract_write_version(atomic_load(&(prev->version_lock))) > extract_write_version(new_version_lock));
+                assert(next == NULL || extract_write_version(atomic_load(&(next->version_lock))) <= extract_write_version(new_version_lock));
+                prev->next = new_version;
+                new_version->next = next;
             }
 
             // write to the shared memory and update the version
             memcpy(target_segment, ith_write->new_val, alignment);
-            atomic_store(ith_v_lock, create_new_versioned_lock(tx_timestamp, tx_timestamp, true));
+            atomic_store(ith_v_lock, new_version_lock);
+
+            // release the lock on the segment_version
+            atomic_store(&(new_version->version_lock), create_new_versioned_lock(tx_timestamp, tx_timestamp, false));
         }
     }
 }
@@ -609,11 +619,12 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             assert(ith_version != NULL);
             segment_version* curr = ith_version;
             // Find the correct version to read
-            while (curr->next != NULL && tx_timestamp < extract_write_version(atomic_load(&(curr->version_lock)))) {
+            while (curr->next != NULL && (is_locked(atomic_load(&(curr->version_lock))) || tx_timestamp < extract_write_version(atomic_load(&(curr->version_lock))))) {
                 curr = curr->next;
             }
             assert(curr != NULL);
             assert(tx_timestamp >= extract_write_version(atomic_load(&(curr->version_lock))));
+            assert(!is_locked(atomic_load(&(curr->version_lock))));
             // curr contains the most recent version that can be read by our transaction
             memcpy(current_target, curr->segment, alignment);
             unsigned long version_lock = atomic_load(&(curr->version_lock));

@@ -223,12 +223,6 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
 
 void free_versions_linked_list(segment_version* versions, size_t nb_items)
 {
-    printf("nb_items: %zu\n", nb_items);
-    printf("sizeof(versions): %zu\n", sizeof(versions));
-    printf("sizeof(versions[0])): %zu\n", sizeof(versions[0]));
-    printf("division: %zu\n", (sizeof(versions) / sizeof(versions[0])));
-    // TODO: put back the assert !
-    // assert(nb_items == sizeof(versions) / sizeof(versions[0]));
     for (size_t i = 0; i < nb_items; i++) {
         segment_version* first_version = &(versions[0]);
         // segment_version next = versions[0];
@@ -236,14 +230,16 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items)
         if (first_version->next != NULL) {
             segment_version* curr = first_version->next;
             while (curr != NULL) {
+                printf("start iteration");
                 segment_version* next_tmp = curr->next;
                 printf("s: %p\n", curr->segment);
                 free_ptr(curr->segment);
                 printf("c: %p\n", (void*)curr);
                 free_ptr((void*)curr);
                 curr = next_tmp;
+                printf("end iteration");
             }
-            assert(curr->next == NULL);
+            assert(curr == NULL);
         }
     }
     free_ptr(versions);

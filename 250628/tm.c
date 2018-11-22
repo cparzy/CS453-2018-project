@@ -217,7 +217,6 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
     }
     reg->versions = versions;
 
-    // printf ("Region %p created\n", (void*)region);
     return reg;
 }
 
@@ -627,7 +626,11 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             // update the read-version of the segment if segment read-version < tx read-version
             if (extract_read_version(version_lock) < tx_timestamp) {
                 unsigned long new_version_lock = set_read_version(version_lock, tx_timestamp);
-                atomic_store(&(curr->version_lock), new_version_lock);
+                bool changed_read_timestamp = atomic_compare_exchange_strong(&(curr->version_lock), &version_lock, new_version_lock);
+                if (!changed_read_timestamp) {
+                    free_transaction(tx, shared);
+                    return false;
+                }
             }
         }
         current_target = alignment + (char*)current_target;

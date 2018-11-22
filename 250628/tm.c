@@ -227,6 +227,7 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items)
     printf("sizeof(versions): %zu\n", sizeof(versions));
     printf("sizeof(versions[0])): %zu\n", sizeof(versions[0]));
     printf("division: %zu\n", (sizeof(versions) / sizeof(versions[0])));
+    // TODO: put back the assert !
     // assert(nb_items == sizeof(versions) / sizeof(versions[0]));
     for (size_t i = 0; i < nb_items; i++) {
         segment_version* first_version = &(versions[0]);
@@ -687,6 +688,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
 
 void free_ptr(void* ptr)
 {
+    assert(ptr != NULL);
     free(ptr);
     ptr = NULL;
 }

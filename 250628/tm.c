@@ -238,8 +238,8 @@ void free_versions_linked_list(segment_version* versions, size_t nb_items)
             while (curr != NULL) {
                 segment_version* next_tmp = curr->next;
                 printf("s: %p\n", curr->segment);
-                printf("c: %p\n", (void*)curr);
                 free_ptr(curr->segment);
+                printf("c: %p\n", (void*)curr);
                 free_ptr((void*)curr);
                 curr = next_tmp;
             }

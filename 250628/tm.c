@@ -157,7 +157,6 @@ bool tm_free(shared_t shared as(unused), tx_t tx as(unused), void* target as(unu
 **/
 shared_t tm_create(size_t size as(unused), size_t align as(unused))
 {
-
     // Allocate the region
     region* reg = (region*) malloc(sizeof(region));
     if (unlikely(!reg)) { // means that the proposition: !region is likely false
@@ -210,9 +209,9 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
         memcpy(ith_segment, src, align);
         unsigned long ith_version_lock = atomic_load(&(reg->v_locks[i]));
         versions[i] = (segment_version) {
-            .segment = ith_segment, .version_lock = 0, .next = NULL
+            .segment = ith_segment, .next = NULL
         };
-        atomic_store(&(versions[i].version_lock), ith_version_lock);
+        atomic_init(&(versions[i].version_lock), ith_version_lock);
         src = align + (char*)src;
     }
     reg->versions = versions;

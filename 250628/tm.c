@@ -624,23 +624,32 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             while (curr->next != NULL && (is_locked(atomic_load(&(curr->version_lock))) || tx_timestamp < extract_write_version(atomic_load(&(curr->version_lock))))) {
                 curr = curr->next;
             }
-            unsigned int write_version = extract_write_version(atomic_load(&(curr->version_lock)));
+            unsigned long version_lock = atomic_load(&(curr->version_lock));
+            unsigned int write_version = extract_write_version(version_lock);
             assert(curr != NULL);
             assert(tx_timestamp >= write_version);
             assert(!is_locked(atomic_load(&(curr->version_lock))));
             // curr contains the most recent version that can be read by our transaction
             memcpy(current_target, curr->segment, alignment);
-            unsigned long version_lock = atomic_load(&(curr->version_lock));
             // update the read-version of the segment if segment read-version < tx read-version
+            atomic_ulong* current_v_lock = &(v_locks[segment_index]);
+            unsigned long current_v_lock_value = atomic_load(current_v_lock);
+            unsigned int current_v_lock_write_version = extract_write_version(current_v_lock_value);
+            if (write_version == current_v_lock_write_version && version_lock != current_v_lock_value) {
+                free_transaction(tx, shared);
+                return false;
+            }
             if (extract_read_version(version_lock) < tx_timestamp) {
                 unsigned long new_version_lock = set_read_version(version_lock, tx_timestamp);
-                if (write_version == extract_write_version(atomic_load(&(v_locks[segment_index])))) {
-                    bool changed_read_timestamp = atomic_compare_exchange_strong(&(v_locks[segment_index]), &version_lock, new_version_lock);
+                if (write_version == current_v_lock_write_version) {
+                    bool changed_read_timestamp = atomic_compare_exchange_strong(current_v_lock, &version_lock, new_version_lock);
                     if (!changed_read_timestamp) {
                         free_transaction(tx, shared);
                         return false;
                     }
                 }
+
+                // === Is it needed?? ===
                 bool changed_read_timestamp = atomic_compare_exchange_strong(&(curr->version_lock), &version_lock, new_version_lock);
                 if (!changed_read_timestamp) {
                     free_transaction(tx, shared);
@@ -652,6 +661,23 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     }
 
     return true;
+}
+
+segment_version* get_segment_version(shared_t shared, size_t segment_index, unsigned int write_version)
+{   
+    size_t size = tm_size(shared);
+    size_t alignment = tm_align(shared);
+    size_t nb_items = get_nb_items(size, alignment);
+    assert(segment_index < nb_items);
+    segment_version** versions = ((region*)shared)->versions;
+    segment_version* curr = versions[segment_index];
+    assert(curr != NULL);
+    while (curr != NULL && extract_write_version(atomic_load(&(curr->version_lock))) != write_version) {
+        curr = curr->next;
+    }
+    assert(curr != NULL);
+    assert(extract_write_version(atomic_load(&(curr->version_lock))) == write_version);
+    return curr;
 }
 
 /** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.

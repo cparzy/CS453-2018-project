@@ -313,7 +313,6 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused))
         }
         tx->writes = writes;
     }
-
     return (tx_t)tx;
 }
 
@@ -627,7 +626,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             unsigned long version_lock = atomic_load(&(curr->version_lock));
             unsigned int write_version = extract_write_version(version_lock);
             assert(tx_timestamp >= write_version);
-            assert(!is_locked(atomic_load(&(curr->version_lock))));
+            assert(!is_locked(version_lock));
             // curr contains the most recent version that can be read by our transaction
             memcpy(current_target, curr->segment, alignment);
             // update the read-version of the segment if segment read-version < tx read-version

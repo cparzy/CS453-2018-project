@@ -606,6 +606,8 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     bool tx_is_ro = ((transaction*)tx)->is_ro;
     write_set* tx_writes = ((transaction*)tx)->writes;
 
+    atomic_ulong* v_locks = ((region*)shared)->v_locks;
+
     size_t nb_items = get_nb_items(size, alignment);
     size_t start_index = get_start_index(shared, source);
     void* current_target = target;
@@ -622,8 +624,9 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             while (curr->next != NULL && (is_locked(atomic_load(&(curr->version_lock))) || tx_timestamp < extract_write_version(atomic_load(&(curr->version_lock))))) {
                 curr = curr->next;
             }
+            unsigned int write_version = extract_write_version(atomic_load(&(curr->version_lock)));
             assert(curr != NULL);
-            assert(tx_timestamp >= extract_write_version(atomic_load(&(curr->version_lock))));
+            assert(tx_timestamp >= write_version);
             assert(!is_locked(atomic_load(&(curr->version_lock))));
             // curr contains the most recent version that can be read by our transaction
             memcpy(current_target, curr->segment, alignment);
@@ -631,6 +634,13 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             // update the read-version of the segment if segment read-version < tx read-version
             if (extract_read_version(version_lock) < tx_timestamp) {
                 unsigned long new_version_lock = set_read_version(version_lock, tx_timestamp);
+                if (write_version == extract_write_version(atomic_load(&(v_locks[segment_index])))) {
+                    bool changed_read_timestamp = atomic_compare_exchange_strong(&(v_locks[segment_index]), &version_lock, new_version_lock);
+                    if (!changed_read_timestamp) {
+                        free_transaction(tx, shared);
+                        return false;
+                    }
+                }
                 bool changed_read_timestamp = atomic_compare_exchange_strong(&(curr->version_lock), &version_lock, new_version_lock);
                 if (!changed_read_timestamp) {
                     free_transaction(tx, shared);

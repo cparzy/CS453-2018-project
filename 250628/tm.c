@@ -633,6 +633,15 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             atomic_ulong* current_v_lock = &(v_locks[segment_index]);
             unsigned long current_v_lock_value = atomic_load(current_v_lock);
             unsigned int current_v_lock_write_version = extract_write_version(current_v_lock_value);
+            if (write_version == current_v_lock_write_version && extract_read_version(current_v_lock_value) < tx_timestamp) {
+                unsigned long new_version_lock = set_read_version(current_v_lock_value, tx_timestamp);
+                bool changed_read_timestamp = atomic_compare_exchange_strong(current_v_lock, &current_v_lock_value, new_version_lock);
+                if (!changed_read_timestamp) {
+                    free_transaction(tx, shared);
+                    return false;
+                }
+            }
+            /*
             if (write_version == current_v_lock_write_version && version_lock != current_v_lock_value) {
                 free_transaction(tx, shared);
                 return false;
@@ -654,6 +663,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
                     return false;
                 }
             }
+            */
         }
         current_target = alignment + (char*)current_target;
     }

@@ -617,16 +617,15 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
         if (!tx_is_ro && written_val->new_val != NULL) {
             memcpy(current_target, written_val->new_val, alignment);
         } else {
-            segment_version* ith_version = ((region*)shared)->versions[segment_index];
-            assert(ith_version != NULL);
-            segment_version* curr = ith_version;
+            segment_version* curr = ((region*)shared)->versions[segment_index];
+            assert(curr != NULL);
             // Find the correct version to read
             while (curr->next != NULL && (is_locked(atomic_load(&(curr->version_lock))) || tx_timestamp < extract_write_version(atomic_load(&(curr->version_lock))))) {
                 curr = curr->next;
             }
+            assert(curr != NULL);
             unsigned long version_lock = atomic_load(&(curr->version_lock));
             unsigned int write_version = extract_write_version(version_lock);
-            assert(curr != NULL);
             assert(tx_timestamp >= write_version);
             assert(!is_locked(atomic_load(&(curr->version_lock))));
             // curr contains the most recent version that can be read by our transaction
@@ -698,16 +697,19 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
 
     write_set* tx_writes = ((transaction*)tx)->writes;
     unsigned int tx_timestamp = ((transaction*)tx)->timestamp;
-    segment_version** versions = ((region*)shared)->versions;
+    // segment_version** versions = ((region*)shared)->versions;
+    atomic_ulong* v_locks = ((region*)shared)->v_locks;
 
     const void* current_src_slot = source;
     for (size_t i = 0; i < nb_items; i++) {
         size_t segment_index = start_index + i;
-        segment_version* segment_version = versions[segment_index];
-        unsigned long segment_version_lock = atomic_load(&(segment_version->version_lock));
-        if (is_locked(segment_version_lock)
-            || extract_read_version(segment_version_lock) > tx_timestamp
-            || extract_write_version(segment_version_lock) > tx_timestamp) { // not sure about the write timestamp
+        // segment_version* segment_version = versions[segment_index];
+        atomic_ulong* ith_lock = &(v_locks[segment_index]);
+        unsigned long version = atomic_load(ith_lock);
+        // unsigned long segment_version_lock = atomic_load(&(segment_version->version_lock));
+        if (is_locked(version)
+            || extract_read_version(version) > tx_timestamp
+            || extract_write_version(version) > tx_timestamp) { // not sure about the write timestamp
             free_transaction(tx, shared);
             return false;
         }

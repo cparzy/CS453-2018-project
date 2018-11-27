@@ -471,25 +471,13 @@ void propagate_writes(shared_t shared, tx_t tx)
 
             // insert this newly created segment_version into the appropriate linked-list, at the correct position
             segment_version* ith_version = versions[i];
+
             assert(ith_version != NULL);
-            segment_version* prev = NULL;
-            segment_version* next = ith_version;
-            while (next != NULL && extract_write_version(atomic_load(&(next->version_lock))) > extract_write_version(new_version_lock)) {
-                prev = next;
-                next = next->next;
-            }
-            if (prev == NULL) {
-                assert(next == ith_version);
-                assert(next != NULL && extract_write_version(atomic_load(&(next->version_lock))) <= extract_write_version(new_version_lock));
-                // in this case, next == ith_version
-                new_version->next = next;
-                versions[i] = new_version;
-            } else {
-                assert(extract_write_version(atomic_load(&(prev->version_lock))) > extract_write_version(new_version_lock));
-                assert(next == NULL || extract_write_version(atomic_load(&(next->version_lock))) <= extract_write_version(new_version_lock));
-                prev->next = new_version;
-                new_version->next = next;
-            }
+            assert(extract_write_version(atomic_load(&(ith_version->version_lock))) <= extract_write_version(new_version_lock));
+            assert(extract_read_version(atomic_load(&(ith_version->version_lock))) <= extract_read_version(new_version_lock));
+
+            new_version->next = ith_version;
+            versions[i] = new_version;
 
             // write to the shared memory and update the version
             memcpy(target_segment, ith_write->new_val, alignment);

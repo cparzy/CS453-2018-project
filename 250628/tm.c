@@ -98,7 +98,6 @@ typedef struct {
 typedef struct {
     bool is_ro;
     unsigned int rv;
-    unsigned int vw;
     shared_memory_state* mem_states;
 } transaction;
 
@@ -443,7 +442,6 @@ void propagate_writes(shared_t shared, tx_t tx)
     unsigned int vw = former_vclock + 1;
     region* reg = (region*)shared;
     transaction* tsct = (transaction*)tx;
-    tsct->vw = vw;
 
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
@@ -466,17 +464,17 @@ void propagate_writes(shared_t shared, tx_t tx)
             void* target_segment = (i * alignment) + (char*)start;
 
             segment_version* s_version = (segment_version*) malloc(sizeof(segment_version));
-            atomic_init(&(s_version->v_lock), tsct->vw);
+            atomic_init(&(s_version->v_lock), vw);
             s_version->content = malloc(alignment);
             memcpy(s_version->content, mem_state->new_val, alignment);
 
             assert(versions[i] != NULL);
-            assert(extract_version(atomic_load(&(versions[i]->v_lock))) < tsct->vw);
+            assert(extract_version(atomic_load(&(versions[i]->v_lock))) < vw);
             s_version->next = versions[i];
             versions[i] = s_version;
 
             // write to the shared memory and update the version
-            unsigned int new_version = get_unlocked_vlock(tsct->vw);
+            unsigned int new_version = get_unlocked_vlock(vw);
             memcpy(target_segment, mem_state->new_val, alignment);
             atomic_store(ith_v_lock, new_version);
         }
@@ -563,8 +561,8 @@ bool tm_read_only(shared_t shared, tx_t tx, void const* source, size_t size, voi
         while (s_version != NULL && extract_version(atomic_load(&(s_version->v_lock))) > tsct->rv) {
             s_version = s_version->next;
         }
-        unsigned int version = extract_version(atomic_load(&(s_version->v_lock)));
         assert(s_version != NULL);
+        unsigned int version = extract_version(atomic_load(&(s_version->v_lock)));
         assert(version <= tsct->rv);
         memcpy(current_target, s_version->content, alignment);
         if (version != extract_version(atomic_load(&(s_version->v_lock)))) {
@@ -588,9 +586,9 @@ bool tm_read_only(shared_t shared, tx_t tx, void const* source, size_t size, voi
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target)
 {
     transaction* tsct = (transaction*)tx;
-    if (tsct->is_ro) {
-        return tm_read_only(shared, tx, source, size, target);
-    }
+    // if (tsct->is_ro) {
+    //     return tm_read_only(shared, tx, source, size, target);
+    // }
 
     region* reg = (region*)shared;
     size_t alignment = tm_align(shared);
@@ -616,13 +614,19 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 
     for (size_t i = 0; i < nb_items; i++) {
         size_t segment_index = start_index + i;
-        shared_memory_state* mem_state = &(tsct->mem_states[segment_index]);
-        if (mem_state->new_val != NULL) {
+        shared_memory_state* mem_state = NULL;
+        if (!tsct->is_ro) {
+            mem_state = &(tsct->mem_states[segment_index]);
+        }
+        if (!tsct->is_ro && mem_state->new_val != NULL) {
             memcpy(current_target, mem_state->new_val, alignment);
         } else {
             memcpy(current_target, current_source, alignment);
         }
-        mem_state->read = true;
+
+        if (!tsct->is_ro) {
+            mem_state->read = true;
+        }
         current_source = alignment + (char*)current_source;
         current_target = alignment + (char*)current_target;
     }

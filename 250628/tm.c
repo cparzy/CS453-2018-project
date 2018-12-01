@@ -74,15 +74,13 @@
 
 typedef struct segment_version segment_version;
 
-struct segment_version
-{
+struct segment_version {
     atomic_uint v_lock;
     void* content;
     segment_version* next;
 };
 
-typedef struct
-{
+typedef struct {
     void* start;
     atomic_uint* v_locks;
     segment_version** versions;
@@ -92,14 +90,12 @@ typedef struct
     atomic_size_t align_alloc;
 } region;
 
-typedef struct
-{
+typedef struct {
     bool read;
     void* new_val;
 } shared_memory_state; // Kind of a read-write set
 
-typedef struct
-{
+typedef struct {
     bool is_ro;
     unsigned int rv;
     unsigned int vw;
@@ -172,21 +168,19 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
 {
     // Allocate the region
     region* reg = (region*) malloc(sizeof(region));
-    if (unlikely(!reg))   // means that the proposition: !region is likely false
-        {
-            return invalid_shared;
-        }
+    if (unlikely(!reg)) { // means that the proposition: !region is likely false
+        return invalid_shared;
+    }
 
     // Check that the given alignment is correct
     // Also satisfy alignment requirement of 'struct link'
     size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align;
 
     // Allocate the first segment of the region
-    if (unlikely(posix_memalign(&(reg->start), align_alloc, size) != 0))
-        {
-            free_ptr(reg);
-            return invalid_shared;
-        }
+    if (unlikely(posix_memalign(&(reg->start), align_alloc, size) != 0)) {
+        free_ptr(reg);
+        return invalid_shared;
+    }
 
     // Fill the first segment of the region with 0s
     memset(reg->start, 0, size);
@@ -200,41 +194,37 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
 
     // Init the array of versioned-locks
     atomic_uint* v_locks = (atomic_uint*) calloc(number_of_items, sizeof(atomic_uint));
-    if (unlikely(!v_locks))
-        {
-            free_ptr(reg->start);
-            free_ptr(reg);
-            return invalid_shared;
-        }
-    for (size_t i = 0; i < number_of_items; i++)
-        {
-            atomic_init(&(v_locks[i]), 0u);
-        }
+    if (unlikely(!v_locks)) {
+        free_ptr(reg->start);
+        free_ptr(reg);
+        return invalid_shared;
+    }
+    for (size_t i = 0; i < number_of_items; i++) {
+        atomic_init(&(v_locks[i]), 0u);
+    }
     reg->v_locks = v_locks;
 
     // Init the segment versions
     segment_version** versions = (segment_version**) calloc(number_of_items, sizeof(segment_version*));
-    if (unlikely(!versions))
-        {
-            free_ptr(reg->start);
-            free_ptr(reg->v_locks);
-            free_ptr(reg);
-            return invalid_shared;
-        }
+    if (unlikely(!versions)) {
+        free_ptr(reg->start);
+        free_ptr(reg->v_locks);
+        free_ptr(reg);
+        return invalid_shared;
+    }
     void* src = reg->start;
-    for (size_t i = 0; i < number_of_items; i++)
-        {
-            void* ith_segment = malloc(align);
-            memcpy(ith_segment, src, align);
-            unsigned int ith_version_lock = atomic_load(&(reg->v_locks[i]));
-            segment_version* first_version = (segment_version*) malloc(sizeof(segment_version));
-            assert(first_version != NULL);
-            first_version->content = ith_segment;
-            first_version->next = NULL;
-            atomic_init(&(first_version->v_lock), ith_version_lock);
-            versions[i] = first_version;
-            src = align + (char*)src;
-        }
+    for (size_t i = 0; i < number_of_items; i++) {
+        void* ith_segment = malloc(align);
+        memcpy(ith_segment, src, align);
+        unsigned int ith_version_lock = atomic_load(&(reg->v_locks[i]));
+        segment_version* first_version = (segment_version*) malloc(sizeof(segment_version));
+        assert(first_version != NULL);
+        first_version->content = ith_segment;
+        first_version->next = NULL;
+        atomic_init(&(first_version->v_lock), ith_version_lock);
+        versions[i] = first_version;
+        src = align + (char*)src;
+    }
     reg->versions = versions;
 
     return reg;
@@ -242,19 +232,17 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
 
 void free_versions_linked_list(segment_version** versions, size_t nb_items)
 {
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            segment_version* curr = versions[i];
-            assert(curr != NULL);
-            while (curr != NULL)
-                {
-                    segment_version* next_tmp = curr->next;
-                    free_ptr(curr->content);
-                    free_ptr((void*)curr);
-                    curr = next_tmp;
-                }
-            assert(curr == NULL);
+    for (size_t i = 0; i < nb_items; i++) {
+        segment_version* curr = versions[i];
+        assert(curr != NULL);
+        while (curr != NULL) {
+            segment_version* next_tmp = curr->next;
+            free_ptr(curr->content);
+            free_ptr((void*)curr);
+            curr = next_tmp;
         }
+        assert(curr == NULL);
+    }
     free_ptr(versions);
 }
 
@@ -310,32 +298,28 @@ size_t tm_align(shared_t shared as(unused))
 tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused))
 {
     transaction* tx = (transaction*) malloc(sizeof(transaction));
-    if (unlikely(!tx))
-        {
-            return invalid_tx;
-        }
+    if (unlikely(!tx)) {
+        return invalid_tx;
+    }
 
     tx->is_ro = is_ro;
     tx->rv = atomic_load(&(((region*)shared)->VClock));
 
-    if (!tx->is_ro)
-        {
-            size_t size = tm_size(shared);
-            size_t align = tm_align(shared);
-            size_t nb_items = get_nb_items(size, align);
-            shared_memory_state* mem_states = (shared_memory_state*) calloc(nb_items, sizeof(shared_memory_state));
-            if (unlikely(!mem_states))
-                {
-                    free_ptr(tx);
-                    return invalid_tx;
-                }
-            for (size_t i = 0; i < nb_items; i++)
-                {
-                    mem_states[i].read = false;
-                    mem_states[i].new_val = NULL;
-                }
-            tx->mem_states = mem_states;
+    if (!tx->is_ro) {
+        size_t size = tm_size(shared);
+        size_t align = tm_align(shared);
+        size_t nb_items = get_nb_items(size, align);
+        shared_memory_state* mem_states = (shared_memory_state*) calloc(nb_items, sizeof(shared_memory_state));
+        if (unlikely(!mem_states)) {
+            free_ptr(tx);
+            return invalid_tx;
         }
+        for (size_t i = 0; i < nb_items; i++) {
+            mem_states[i].read = false;
+            mem_states[i].new_val = NULL;
+        }
+        tx->mem_states = mem_states;
+    }
     return (tx_t)tx;
 }
 
@@ -346,28 +330,25 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused))
 **/
 bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
 {
-    if (((transaction*)tx)->is_ro)
-        {
-            free_transaction(tx, shared);
-            return true;
-        }
+    if (((transaction*)tx)->is_ro) {
+        free_transaction(tx, shared);
+        return true;
+    }
 
-    if (!lock_write_set(tx, shared))
-        {
-            free_transaction(tx, shared);
-            return false;
-        }
+    if (!lock_write_set(tx, shared)) {
+        free_transaction(tx, shared);
+        return false;
+    }
 
     size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
     size_t nb_items = get_nb_items(size, alignment);
 
-    if (!validate_read_set(shared, tx, nb_items))
-        {
-            release_write_locks(shared, tx, nb_items);
-            free_transaction(tx, shared);
-            return false;
-        }
+    if (!validate_read_set(shared, tx, nb_items)) {
+        release_write_locks(shared, tx, nb_items);
+        free_transaction(tx, shared);
+        return false;
+    }
 
     propagate_writes(shared, tx);
     free_transaction(tx, shared);
@@ -384,61 +365,53 @@ bool lock_write_set(tx_t tx, shared_t shared)
     size_t nb_items = get_nb_items(size, alignment);
     shared_memory_state* mem_states = tsct->mem_states;
     atomic_uint* v_locks = reg->v_locks;
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            shared_memory_state* mem_state = &(mem_states[i]);
-            // if in write-set
-            if (mem_state->new_val != NULL)
-                {
-                    // try to acquire the lock on this segment
-                    atomic_uint* ith_v_lock = &(v_locks[i]);
-                    unsigned int old_value = atomic_load(ith_v_lock);
-                    // compute the expected value
-                    unsigned int expected_value = get_unlocked_vlock(old_value);
-                    // compute the new value
-                    unsigned int new_value = get_locked_vlock(old_value);
+    for (size_t i = 0; i < nb_items; i++) {
+        shared_memory_state* mem_state = &(mem_states[i]);
+        // if in write-set
+        if (mem_state->new_val != NULL) {
+            // try to acquire the lock on this segment
+            atomic_uint* ith_v_lock = &(v_locks[i]);
+            unsigned int old_value = atomic_load(ith_v_lock);
+            // compute the expected value
+            unsigned int expected_value = get_unlocked_vlock(old_value);
+            // compute the new value
+            unsigned int new_value = get_locked_vlock(old_value);
 
-                    bool got_the_lock = atomic_compare_exchange_strong(ith_v_lock, &expected_value, new_value);
-                    if (!got_the_lock)
-                        {
-                            // release all the locks acquired until now
-                            release_write_locks(shared, tx, i);
-                            return false;
-                        }
-                }
+            bool got_the_lock = atomic_compare_exchange_strong(ith_v_lock, &expected_value, new_value);
+            if (!got_the_lock) {
+                // release all the locks acquired until now
+                release_write_locks(shared, tx, i);
+                return false;
+            }
         }
+    }
     return true;
 }
 
 bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t number_of_items)
 {
-    if (shared == NULL || (void*)tx == NULL)
-        {
-            return false;
-        }
+    if (shared == NULL || (void*)tx == NULL) {
+        return false;
+    }
     region* reg = (region*)shared;
     transaction* tsct = (transaction*)tx;
-    for (size_t i = 0; i < number_of_items; i++)
-        {
-            // If is read-set
-            shared_memory_state* ith_memory = &(tsct->mem_states[i]);
-            if (ith_memory->read)
-                {
-                    // version_lock* curr_version_lock = &(((struct region*)shared)->version_locks[i]);
-                    unsigned int v_l = atomic_load(&(reg->v_locks[i]));
-                    bool locked = is_locked(v_l);
-                    unsigned int version = extract_version(v_l);
-                    // if it is not in the write-set but it is locked
-                    if (ith_memory->new_val == NULL && locked)
-                        {
-                            return false;
-                        }
-                    if (version > tsct->rv)
-                        {
-                            return false;
-                        }
-                }
+    for (size_t i = 0; i < number_of_items; i++) {
+        // If is read-set
+        shared_memory_state* ith_memory = &(tsct->mem_states[i]);
+        if (ith_memory->read) {
+            // version_lock* curr_version_lock = &(((struct region*)shared)->version_locks[i]);
+            unsigned int v_l = atomic_load(&(reg->v_locks[i]));
+            bool locked = is_locked(v_l);
+            unsigned int version = extract_version(v_l);
+            // if it is not in the write-set but it is locked
+            if (ith_memory->new_val == NULL && locked) {
+                return false;
+            }
+            if (version > tsct->rv) {
+                return false;
+            }
         }
+    }
     return true;
 }
 
@@ -452,18 +425,16 @@ void release_write_locks(shared_t shared, tx_t tx, size_t until)
 
     atomic_uint* v_locks = ((region*)shared)->v_locks;
     shared_memory_state* mem_states = ((transaction*)tx)->mem_states;
-    for (size_t i = 0; i < until; i++)
-        {
-            shared_memory_state* mem_state = &(mem_states[i]);
-            if (mem_state->new_val != NULL)
-                {
-                    atomic_uint* ith_v_lock = &(v_locks[i]);
-                    unsigned int old_value = atomic_load(ith_v_lock);
-                    assert(is_locked(old_value));
-                    unsigned int new_value = get_unlocked_vlock(old_value);
-                    atomic_store(ith_v_lock, new_value);
-                }
+    for (size_t i = 0; i < until; i++) {
+        shared_memory_state* mem_state = &(mem_states[i]);
+        if (mem_state->new_val != NULL) {
+            atomic_uint* ith_v_lock = &(v_locks[i]);
+            unsigned int old_value = atomic_load(ith_v_lock);
+            assert(is_locked(old_value));
+            unsigned int new_value = get_unlocked_vlock(old_value);
+            atomic_store(ith_v_lock, new_value);
         }
+    }
 }
 
 void propagate_writes(shared_t shared, tx_t tx)
@@ -484,57 +455,51 @@ void propagate_writes(shared_t shared, tx_t tx)
 
     shared_memory_state* mem_states = tsct->mem_states;
 
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            shared_memory_state* mem_state = &(mem_states[i]);
-            if (mem_state->new_val != NULL)
-                {
-                    atomic_uint* ith_v_lock = &(v_locks[i]);
-                    unsigned long version = atomic_load(ith_v_lock);
-                    assert(is_locked(version));
+    for (size_t i = 0; i < nb_items; i++) {
+        shared_memory_state* mem_state = &(mem_states[i]);
+        if (mem_state->new_val != NULL) {
+            atomic_uint* ith_v_lock = &(v_locks[i]);
+            unsigned long version = atomic_load(ith_v_lock);
+            assert(is_locked(version));
 
-                    // point to the correct segment of shared memory
-                    void* target_segment = (i * alignment) + (char*)start;
+            // point to the correct segment of shared memory
+            void* target_segment = (i * alignment) + (char*)start;
 
-                    segment_version* s_version = (segment_version*) malloc(sizeof(segment_version));
-                    atomic_init(&(s_version->v_lock), tsct->vw);
-                    s_version->content = malloc(alignment);
-                    memcpy(s_version->content, mem_state->new_val, alignment);
+            segment_version* s_version = (segment_version*) malloc(sizeof(segment_version));
+            atomic_init(&(s_version->v_lock), tsct->vw);
+            s_version->content = malloc(alignment);
+            memcpy(s_version->content, mem_state->new_val, alignment);
 
-                    assert(versions[i] != NULL);
-                    assert(extract_version(atomic_load(&(versions[i]->v_lock))) < tsct->vw);
-                    s_version->next = versions[i];
-                    versions[i] = s_version;
+            assert(versions[i] != NULL);
+            assert(extract_version(atomic_load(&(versions[i]->v_lock))) < tsct->vw);
+            s_version->next = versions[i];
+            versions[i] = s_version;
 
-                    // write to the shared memory and update the version
-                    unsigned int new_version = get_unlocked_vlock(tsct->vw);
-                    memcpy(target_segment, mem_state->new_val, alignment);
-                    atomic_store(ith_v_lock, new_version);
-                }
+            // write to the shared memory and update the version
+            unsigned int new_version = get_unlocked_vlock(tsct->vw);
+            memcpy(target_segment, mem_state->new_val, alignment);
+            atomic_store(ith_v_lock, new_version);
         }
+    }
 }
 
 void free_transaction(tx_t tx, shared_t shared)
 {
-    if ((void*)tx == NULL)
-        {
-            return;
+    if ((void*)tx == NULL) {
+        return;
+    }
+    if (!((transaction*)tx)->is_ro) {
+        size_t size = tm_size(shared);
+        size_t alignment = tm_align(shared);
+        size_t nb_items = get_nb_items(size, alignment);
+        for (size_t i = 0; i < nb_items; i++) {
+            shared_memory_state* mem_state = &(((transaction*)tx)->mem_states[i]);
+            if (mem_state->new_val != NULL) {
+                free_ptr(mem_state->new_val);
+            }
         }
-    if (!((transaction*)tx)->is_ro)
-        {
-            size_t size = tm_size(shared);
-            size_t alignment = tm_align(shared);
-            size_t nb_items = get_nb_items(size, alignment);
-            for (size_t i = 0; i < nb_items; i++)
-                {
-                    shared_memory_state* mem_state = &(((transaction*)tx)->mem_states[i]);
-                    if (mem_state->new_val != NULL)
-                        {
-                            free_ptr(mem_state->new_val);
-                        }
-                }
-            free_ptr((void*)(((transaction*)tx)->mem_states));
-        }
+        free_ptr((void*)(((transaction*)tx)->mem_states));
+    }
     free_ptr((void*)tx);
 }
 
@@ -591,20 +556,18 @@ bool tm_read_only(shared_t shared, tx_t tx, void const* source, size_t size, voi
     size_t nb_items = get_nb_items(size, alignment);
     size_t start_index = get_start_index(shared, source);
     void* current_target = target;
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            size_t segment_index = start_index + i;
-            segment_version* s_version = reg->versions[segment_index];
-            assert(s_version != NULL);
-            while (s_version != NULL && extract_version(atomic_load(&(s_version->v_lock))) > tsct->rv)
-                {
-                    s_version = s_version->next;
-                }
-            assert(s_version != NULL);
-            assert(extract_version(atomic_load(&(s_version->v_lock))) <= tsct->rv);
-            memcpy(current_target, s_version->content, alignment);
-            current_target = alignment + (char*)current_target;
+    for (size_t i = 0; i < nb_items; i++) {
+        size_t segment_index = start_index + i;
+        segment_version* s_version = reg->versions[segment_index];
+        assert(s_version != NULL);
+        while (s_version != NULL && extract_version(atomic_load(&(s_version->v_lock))) > tsct->rv) {
+            s_version = s_version->next;
         }
+        assert(s_version != NULL);
+        assert(extract_version(atomic_load(&(s_version->v_lock))) <= tsct->rv);
+        memcpy(current_target, s_version->content, alignment);
+        current_target = alignment + (char*)current_target;
+    }
     return true;
 }
 
@@ -619,10 +582,9 @@ bool tm_read_only(shared_t shared, tx_t tx, void const* source, size_t size, voi
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target)
 {
     transaction* tsct = (transaction*)tx;
-    if (tsct->is_ro)
-        {
-            return tm_read_only(shared, tx, source, size, target);
-        }
+    if (tsct->is_ro) {
+        return tm_read_only(shared, tx, source, size, target);
+    }
 
     region* reg = (region*)shared;
     size_t alignment = tm_align(shared);
@@ -634,75 +596,64 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 
     unsigned int* locks_before_reading = (unsigned int*) calloc(nb_items, sizeof(unsigned int));
     assert(locks_before_reading != NULL);
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            size_t lock_index = start_index + i;
-            atomic_uint* ith_version_lock = &(reg->v_locks[lock_index]);
-            unsigned int ith_lock = atomic_load(ith_version_lock);
-            locks_before_reading[i] = ith_lock;
-            if (is_locked(ith_lock) || extract_version(ith_lock) > tsct->rv)
-                {
-                    free(locks_before_reading);
-                    free_transaction(tx, shared);
-                    return false;
-                }
-        }
-
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            size_t segment_index = start_index + i;
-            shared_memory_state* mem_state = &(tsct->mem_states[segment_index]);
-            if (mem_state->new_val != NULL)
-                {
-                    memcpy(current_target, mem_state->new_val, alignment);
-                }
-            else
-                {
-                    memcpy(current_target, current_source, alignment);
-                }
-            mem_state->read = true;
-            current_source = alignment + (char*)current_source;
-            current_target = alignment + (char*)current_target;
-        }
-
-    bool validated = validate_after_read(shared, tx, source, start_index, nb_items, locks_before_reading);
-    free_ptr((void*)locks_before_reading);
-    if (!validated)
-        {
+    for (size_t i = 0; i < nb_items; i++) {
+        size_t lock_index = start_index + i;
+        atomic_uint* ith_version_lock = &(reg->v_locks[lock_index]);
+        unsigned int ith_lock = atomic_load(ith_version_lock);
+        locks_before_reading[i] = ith_lock;
+        if (is_locked(ith_lock) || extract_version(ith_lock) > tsct->rv) {
+            free(locks_before_reading);
             free_transaction(tx, shared);
             return false;
         }
+    }
+
+    for (size_t i = 0; i < nb_items; i++) {
+        size_t segment_index = start_index + i;
+        shared_memory_state* mem_state = &(tsct->mem_states[segment_index]);
+        if (mem_state->new_val != NULL) {
+            memcpy(current_target, mem_state->new_val, alignment);
+        } else {
+            memcpy(current_target, current_source, alignment);
+        }
+        mem_state->read = true;
+        current_source = alignment + (char*)current_source;
+        current_target = alignment + (char*)current_target;
+    }
+
+    bool validated = validate_after_read(shared, tx, source, start_index, nb_items, locks_before_reading);
+    free_ptr((void*)locks_before_reading);
+    if (!validated) {
+        free_transaction(tx, shared);
+        return false;
+    }
     return true;
 }
 
 bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items, unsigned int* locks_before_reading)
 {
-    if (shared == NULL || (void*)tx == NULL || source == NULL || locks_before_reading == NULL)
-        {
-            // printf ("validate_after_read fail\n");
-            return false;
-        }
+    if (shared == NULL || (void*)tx == NULL || source == NULL || locks_before_reading == NULL) {
+        // printf ("validate_after_read fail\n");
+        return false;
+    }
     region* reg = (region*)shared;
     transaction* tsct = (transaction*)tx;
-    for (size_t i = 0; i < nb_items; i++)
-        {
-            unsigned int before_read_lock = locks_before_reading[i];
-            assert(!is_locked(before_read_lock));
-            unsigned int before_read_version = extract_version(before_read_lock);
-            assert(before_read_version <= tsct->rv);
-            size_t lock_index = i + start_index;
-            unsigned int v_l = atomic_load(&(reg->v_locks[lock_index]));
-            bool locked = is_locked(v_l);
-            if (locked)
-                {
-                    return false;
-                }
-            unsigned int version = extract_version(v_l);
-            if (before_read_version != version || version > tsct->rv)
-                {
-                    return false;
-                }
+    for (size_t i = 0; i < nb_items; i++) {
+        unsigned int before_read_lock = locks_before_reading[i];
+        assert(!is_locked(before_read_lock));
+        unsigned int before_read_version = extract_version(before_read_lock);
+        assert(before_read_version <= tsct->rv);
+        size_t lock_index = i + start_index;
+        unsigned int v_l = atomic_load(&(reg->v_locks[lock_index]));
+        bool locked = is_locked(v_l);
+        if (locked) {
+            return false;
         }
+        unsigned int version = extract_version(v_l);
+        if (before_read_version != version || version > tsct->rv) {
+            return false;
+        }
+    }
     // printf ("validate_after_read success\n");
     return true;
 }
@@ -724,21 +675,17 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     size_t start_index = get_start_index(shared, target);
     size_t number_of_items = get_nb_items(size, alignment);
     const void* current_src_slot = source;
-    for (size_t i = start_index; i < start_index + number_of_items; i++)
-        {
-            shared_memory_state* memory_state = &(tsct->mem_states[i]);
-            if (memory_state->new_val != NULL)
-                {
-                    memcpy(memory_state->new_val, current_src_slot, alignment);
-                }
-            else
-                {
-                    memory_state->new_val = malloc(alignment);
-                    assert(memory_state->new_val != NULL);
-                    memcpy(memory_state->new_val, current_src_slot, alignment);
-                }
-            current_src_slot = alignment + (const char*)current_src_slot;
+    for (size_t i = start_index; i < start_index + number_of_items; i++) {
+        shared_memory_state* memory_state = &(tsct->mem_states[i]);
+        if (memory_state->new_val != NULL) {
+            memcpy(memory_state->new_val, current_src_slot, alignment);
+        } else {
+            memory_state->new_val = malloc(alignment);
+            assert(memory_state->new_val != NULL);
+            memcpy(memory_state->new_val, current_src_slot, alignment);
         }
+        current_src_slot = alignment + (const char*)current_src_slot;
+    }
     return true;
 }
 

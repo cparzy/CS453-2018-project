@@ -563,9 +563,15 @@ bool tm_read_only(shared_t shared, tx_t tx, void const* source, size_t size, voi
         while (s_version != NULL && extract_version(atomic_load(&(s_version->v_lock))) > tsct->rv) {
             s_version = s_version->next;
         }
+        unsigned int version = extract_version(atomic_load(&(s_version->v_lock)));
         assert(s_version != NULL);
-        assert(extract_version(atomic_load(&(s_version->v_lock))) <= tsct->rv);
+        assert(version <= tsct->rv);
         memcpy(current_target, s_version->content, alignment);
+        if (version != extract_version(atomic_load(&(s_version->v_lock)))) {
+            printf("Concurrent read-write\n");
+            free_transaction(tx, shared);
+            return false;
+        }
         current_target = alignment + (char*)current_target;
     }
     return true;
@@ -602,7 +608,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
         unsigned int ith_lock = atomic_load(ith_version_lock);
         locks_before_reading[i] = ith_lock;
         if (is_locked(ith_lock) || extract_version(ith_lock) > tsct->rv) {
-            free(locks_before_reading);
+            free((void*)locks_before_reading);
             free_transaction(tx, shared);
             return false;
         }

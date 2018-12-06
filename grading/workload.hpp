@@ -35,30 +35,6 @@
 /** Worker unique ID type.
 **/
 using Uid = uint_fast32_t;
-/* class Uid {
-protected:
-    uint_fast32_t uid; // Worker unique identifier
-    uint_fast32_t len; // Number of workers
-public:
-    ** Value constructors.
-     * @param uid Worker unique identifier
-     * @param len Number of workers
-    **
-    Uid(decltype(uid)&& uid, decltype(len)&& len) noexcept: uid{::std::move(uid)}, len{::std::move(len)} {}
-public:
-    ** Implicit cast to worker UID.
-     * @return Worker unique identifier
-    **
-    operator decltype(uid)() const noexcept { // NOTE: A bit of feature abuse here...
-        return uid;
-    }
-    ** Get number of workers.
-     * @return Number of workers
-    **
-    auto length() const noexcept {
-        return len;
-    }
-}; */
 
 /** Seed type.
 **/
@@ -308,7 +284,7 @@ public:
             return segment.accounts[0] == init_balance;
         });
         if (unlikely(!correct))
-            return "Inconsistency found: violated consistency (check that committed writes in shared memory get visible to the following transactions' reads)";
+            return "Violated consistency (check that committed writes in shared memory get visible to the following transactions' reads)";
         return nullptr;
     }
     virtual char const* run(Uid uid [[gnu::unused]], Seed seed) const {
@@ -320,7 +296,7 @@ public:
         for (size_t cntr = 0; cntr < nbtxperwrk; ++cntr) {
             if (long_dist(engine)) { // Do a long transaction
                 if (unlikely(!long_tx(count)))
-                    return "Inconsistency found: violated isolation or atomicity";
+                    return "Violated isolation or atomicity";
             } else if (alloc_dist(engine)) { // Do an allocation transaction
                 alloc_tx(alloc_trigger(engine));
             } else { // Do a short transaction
@@ -331,7 +307,7 @@ public:
         { // Last long transaction
             size_t dummy;
             if (!long_tx(dummy))
-                return "Inconsistency found: violated isolation or atomicity";
+                return "Violated isolation or atomicity";
         }
         return nullptr;
     }
@@ -352,7 +328,7 @@ public:
                 ::std::cout << "HERE!" << ::std::endl;
                 barrier.sync();
                 barrier.sync();
-                return "Inconsistency found: violated consistency";
+                return "Violated consistency";
             }
         }
         barrier.sync();
@@ -371,7 +347,7 @@ public:
             });
             if (unlikely(!correct)) {
                 barrier.sync();
-                return "Inconsistency found: violated consistency, isolation or atomicity";
+                return "Violated consistency, isolation or atomicity";
             }
         }
         barrier.sync();
@@ -381,7 +357,7 @@ public:
                 return counter == 0;
             });
             if (unlikely(!correct))
-                return "Inconsistency found: violated consistency";
+                return "Violated consistency";
         }
         return nullptr;
     }

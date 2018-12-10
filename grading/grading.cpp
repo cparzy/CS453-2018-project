@@ -175,7 +175,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
                     sync.worker_notify("Internal worker exception(s)"); // Exception post-'Sync::worker_wait' (i.e. in 'Workload::run' or 'Workload::check'), since 'Sync::worker_*' do not throw
                     { // Print the error
                         ::std::unique_lock<decltype(cerrlock)> guard{cerrlock};
-                        ::std::cerr << "⎧ *** EXCEPTION - worker thread ***" << ::std::endl << "⎩ " << err.what() << ::std::endl;
+                        ::std::cerr << "⎪⎧ *** EXCEPTION - worker thread ***" << ::std::endl << "⎪⎩ " << err.what() << ::std::endl;
                     }
                     return;
                 }

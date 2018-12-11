@@ -89,13 +89,31 @@ size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused
 
 void free_transaction(tx_t tx, shared_t shared);
 
-struct region {
+typedef struct {
+    uintptr_t from;
+    uintptr_t to;
+    size_t size;
     void* start;
+    shared_segment_node* next;
+    atomic_uint* version_locks; // The last bit is the lock bit
+    atomic_bool free;
+} shared_segment_node;
+
+typedef struct {
+    uintptr_t from;
+    uintptr_t to;
+    size_t size;
+    shared_memory_state* mem_state;
+    local_segment_node* next;
+    shared_segment_node* shared_segment;
+} local_segment_node;
+
+struct region {
     atomic_size_t size;        // Size of the shared memory region (in bytes)
     atomic_size_t align;       // Claimed alignment of the shared memory region (in bytes)
     atomic_size_t align_alloc; // Actual alignment of the memory allocations (in bytes)
     atomic_uint VClock;
-    atomic_uint* version_locks; // The last bit is the lock bit
+    shared_segment_node* first_shared_segment;
 };
 
 typedef struct {
@@ -107,7 +125,7 @@ struct transaction {
     bool is_ro; // whether the transaction is read-only
     unsigned int rv; // read-version number
     unsigned int vw; // write-version number
-    shared_memory_state* memory_state;
+    local_segment_node* first_segment;
 };
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
@@ -127,14 +145,19 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
     // Also satisfy alignment requirement of 'struct link'
     size_t align_alloc = align < sizeof(void*) ? sizeof(void*) : align;
 
+    shared_segment_node* first_segment = (shared_segment_node*) malloc(sizeof(shared_segment_node));
     // Allocate the first segment of the region
-    if (unlikely(posix_memalign(&(region->start), align_alloc, size) != 0)) {
+    if (unlikely(posix_memalign(&(first_segment->start), align_alloc, size) != 0)) {
         free_ptr(region);
         return invalid_shared;
     }
-
     // Fill the first segment of the region with 0s
-    memset(region->start, 0, size);
+    memset(first_segment->start, 0, size);
+
+    first_segment->from = (uintptr_t) first_segment->start;
+    first_segment->size = size;
+    first_segment->to = (uintptr_t) first_segment->start + size;
+    atomic_init(&(first_segment->free), false);
 
     atomic_init(&(region->size), size);
     atomic_init(&(region->align), align);
@@ -145,15 +168,13 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
  
     // Init the array of versioned-locks
     atomic_uint* version_locks = (atomic_uint*) calloc(number_of_items, sizeof(atomic_uint));
-    if (unlikely(!version_locks)) {
-        free_ptr(region->start);
-        free_ptr(region);
-        return invalid_shared;
-    }
+    assert(version_locks != NULL);
     for (size_t i = 0; i < number_of_items; i++) {
         atomic_init(&(version_locks[i]), 0u);
     }
-    region->version_locks = version_locks;
+    first_segment->version_locks = version_locks;
+
+    region->first_shared_segment = first_segment;
     
     // printf ("Region %p created\n", (void*)region);
     return region;    
@@ -164,8 +185,14 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused)) {
 **/
 void tm_destroy(shared_t shared as(unused)) {
     struct region* reg = (struct region*)shared;
-    free_ptr(reg->start);
-    free_ptr((void*)(reg->version_locks));
+    shared_segment_node* curr_segment = reg->first_segment;
+    while (curr_segment != NULL) {
+        free_ptr(curr_segment->start);
+        free_ptr((void*)(curr_segment->version_locks));
+        shared_segment_node* next = curr_segment->next;
+        free_ptr((void*)curr_segment);
+        curr_segment = next;
+    }
     free_ptr(shared);
 }
 
@@ -174,7 +201,8 @@ void tm_destroy(shared_t shared as(unused)) {
  * @return Start address of the first allocated segment
 **/
 void* tm_start(shared_t shared as(unused)) {
-    return ((struct region*)shared)->start;
+    struct region* reg = (struct region*)shared;
+    return reg->first_segment->start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -201,8 +229,9 @@ size_t tm_align(shared_t shared as(unused)) {
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
 tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
-    unsigned int global_clock = atomic_load(&(((struct region*)shared)->VClock));
- 
+    struct region* reg = (struct region*)shared;
+    unsigned int global_clock = atomic_load(&((reg->VClock));
+    
     struct transaction* trans = (struct transaction*) malloc(sizeof(struct transaction));
     if (unlikely(!trans)) {
         // printf ("tm_begin failed\n");
@@ -211,25 +240,34 @@ tx_t tm_begin(shared_t shared as(unused), bool is_ro as(unused)) {
 
     trans->rv = global_clock;
     trans->is_ro = is_ro;
-    size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
-    size_t number_of_items = get_nb_items(size, alignment);
- 
-    if (!is_ro) {
-        shared_memory_state* memory_state = (shared_memory_state*) calloc(number_of_items, sizeof(shared_memory_state));
-        if (unlikely(!memory_state)) {
-            free_ptr(trans);
-            // printf ("tm_begin failed\n");
-            return invalid_tx;
-        }
 
-        for (size_t i = 0; i < number_of_items; i++) {
-            memory_state[i].read = false;
-            memory_state[i].new_val = NULL;
+    /*
+    if (!is_ro) {
+        local_segment_node* prev = NULL;
+        shared_segment_node* curr_shared_segment = reg->first_shared_segment;
+        while (curr_shared_segment != NULL) {
+            if (!atomic_load(curr_shared_segment->free)) {
+                local_segment_node* local_segment = (local_segment_node*) malloc(sizeof(local_segment_node));
+                local_segment->from = curr_shared_segment->from;
+                local_segment->to = curr_shared_segment->to;
+                local_segment->size = curr_shared_segment->size;
+                size_t nb_items = get_nb_items(local_segment->size, alignment);
+                local_segment->mem_state = (shared_memory_state*) calloc(nb_items, sizeof(shared_memory_state));
+                assert(local_segment->mem_state != NULL);
+                for (size_t i = 0; i < nb_items; i++) {
+                    local_segment->mem_state[i].read = false;
+                    local_segment->mem_state[i].new_val = NULL;
+                }
+                if (prev != NULL) {
+                    prev->next = local_segment;
+                }
+                prev = local_segment;
+            }
+            curr_shared_segment = curr_shared_segment->next;
         }
-        trans->memory_state = memory_state;
-    }
-    
+    }    
+    */
 
     // printf ("transaction %p begins\n", (void*)trans);
     return (tx_t)trans;
@@ -277,9 +315,9 @@ void free_transaction(tx_t tx, shared_t shared) {
     free_ptr((void*)tx);
 }
 
-size_t get_start_index(shared_t shared as(unused), void const* mem_ptr as(unused)) {
+size_t get_start_index(shared_segment_node* shared_segment, size_t alignment, void const* mem_ptr) {
     size_t alignment = tm_align(shared);
-    void* start = tm_start(shared);
+    void* start = shared_segment->start;
     size_t start_index = (mem_ptr - start) / alignment;
     return start_index;
 }
@@ -299,17 +337,16 @@ unsigned int extract_version(unsigned int versioned_lock) {
     return versioned_lock & extract_version_mask;
 }
 
-bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items, unsigned int* locks_before_reading) {
+bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t start_index, size_t nb_items, unsigned int* locks_before_reading, shared_segment_node* shared_segment) {
     if (shared == NULL || (void*)tx == NULL || source == NULL || locks_before_reading == NULL) {
         // printf ("validate_after_read fail\n");
         return false;
     }
-    assert(sizeof(locks_before_reading)/sizeof(unsigned int*) == nb_items);
     for (size_t i = 0; i < nb_items; i++) {
         unsigned int before_read_lock = locks_before_reading[i];
         assert(!is_locked(before_read_lock));
         size_t lock_index = i + start_index;
-        unsigned int v_l = atomic_load(&(((struct region*)shared)->version_locks[lock_index]));
+        unsigned int v_l = atomic_load(&(shared_segment->version_locks[lock_index]));
         bool locked = is_locked(v_l);
         if (locked) {
             // printf ("validate_after_read fail\n");
@@ -324,6 +361,60 @@ bool validate_after_read(shared_t shared as(unused), tx_t tx as(unused), void co
     }
     // printf ("validate_after_read success\n");
     return true;
+}
+
+local_segment_node* create_local_from_shared_segment(shared_segment_node* segment, size_t alignment) {
+    local_segment_node* local_segment = (local_segment_node*) malloc(sizeof(local_segment_node));
+    local_segment->from = segment->from;
+    local_segment->to = segment->to;
+    local_segment->size = segment->size;
+    size_t nb_items = get_nb_items(local_segment->size, alignment);
+    local_segment->mem_state = (shared_memory_state*) calloc(nb_items, sizeof(shared_memory_state));
+    local_segment->shared_segment = shared_segment;
+    assert(local_segment->mem_state != NULL);
+    for (size_t i = 0; i < nb_items; i++) {
+        local_segment->mem_state[i].read = false;
+        local_segment->mem_state[i].new_val = NULL;
+    }
+    return local_segment;
+}
+
+shared_segment_node* get_shared_segment(void const* source, shared_t shared) {
+    struct region* reg = (struct region*) shared;
+    uintptr_t src = (uintptr_t) source;
+    shared_segment_node* curr_shared_segment = reg->first_shared_segment;
+    assert(curr_shared_segment != NULL);
+    while (curr_shared_segment != NULL) {
+        if (curr_shared_segment->from <= src && src < curr_shared_segment->to) {
+            return curr_shared_segment;
+        }
+    }
+
+    return NULL;
+}
+
+local_segment_node* get_local_segment(void const* source, txt_t tx, shared_segment_node* shared_segment, size_t alignment) {
+    struct transaction* trans = (struct transaction*)tx;
+    struct region* reg = (struct region*)shared;
+    uintptr_t src = (uintptr_t)source;
+    local_segment_node* curr_local_segment = trans->first_segment;
+    local_segment_node* prev = NULL;
+    while (curr_local_segment != NULL) {
+        if (curr_local_segment->from <= src && src < curr_local_segment->to) {
+            return curr_local_segment;
+        }
+        prev = curr_local_segment;
+        curr_local_segment = curr_local_segment->next;
+    }
+
+    assert(curr_local_segment == NULL);
+    local_segment_node* local_segment = create_local_from_shared_segment(shared_segment, alignment);
+    if (prev == NULL) {
+        trans->first_segment = local_segment;
+    } else {
+        prev->next = local_segment;
+    }
+    return local_segment;
 }
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
@@ -342,7 +433,14 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
         // printf ("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
         return false;
     }
-    size_t start_index = get_start_index(shared, source);
+    shared_segment_node* shared_segment = get_shared_segment(source, shared);
+    assert(shared_segment != NULL);
+    local_segment_node* local_segment = get_local_segment(source, tx, shared_segment, alignment);
+    assert(local_segment != NULL);
+
+    assert((uintptr_t)source + size <= local_segment->to);
+
+    size_t start_index = get_start_index(local, source);
     // number of items we want to read
     size_t number_of_items = get_nb_items(size, alignment);
  
@@ -356,7 +454,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     }
     for (size_t i = 0; i < number_of_items; i++) {
         size_t lock_index = start_index + i;
-        atomic_uint* ith_version_lock = &(((struct region*)shared)->version_locks[lock_index]);
+        atomic_uint* ith_version_lock = &(shared_segment->version_locks[lock_index]);
         unsigned int ith_lock = atomic_load(ith_version_lock);
         locks_before_reading[i] = ith_lock;
         if (is_locked(ith_lock) || extract_version(ith_lock) > ((struct transaction*)tx)->rv) {
@@ -369,14 +467,12 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
         shared_memory_state* memory_state = NULL;
         if (!transaction_is_ro) {
-            memory_state = &(((struct transaction*)tx)->memory_state[i]);
+            memory_state = &(local_segment->mem_state[i]);
         }
         if (!transaction_is_ro && memory_state->new_val != NULL) {
             memcpy(current_trgt_slot, memory_state->new_val, alignment);
         } else {
-            // Check lock and timestamp
             memcpy(current_trgt_slot, current_src_slot, alignment);
-            // Check lock and timestamp
         }
         if (!transaction_is_ro) {
             // Add this location into the read-set
@@ -388,7 +484,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     }
 
     // validate the read => has to appear atomic
-    bool validated = validate_after_read(shared, tx, source, start_index, number_of_items, locks_before_reading);
+    bool validated = validate_after_read(shared, tx, source, start_index, number_of_items, locks_before_reading, shared_segment);
     free_ptr((void*)locks_before_reading);
     if (!validated) {
         free_transaction(tx, shared);
@@ -416,11 +512,18 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
         return false;
     }
 
-    size_t start_index = get_start_index(shared, target);
+    shared_segment_node* shared_segment = get_shared_segment(target, shared);
+    assert(shared_segment != NULL);
+    local_segment_node* local_segment = get_local_segment(target, tx, shared_segment, alignment);
+    assert(local_segment != NULL);
+
+    assert((uintptr_t)target + size <= local_segment->to);
+
+    size_t start_index = get_start_index(local_segment, target);
     size_t number_of_items = get_nb_items(size, alignment);
     const void* current_src_slot = source;
     for (size_t i = start_index; i < start_index + number_of_items; i++) {
-        shared_memory_state* memory_state = &(((struct transaction*)tx)->memory_state[i]);
+        shared_memory_state* memory_state = &(local_segment->memory_state[i]);
         if (memory_state->new_val != NULL) {
             memcpy(memory_state->new_val, current_src_slot, alignment);
         } else {
@@ -467,18 +570,35 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused)) {
 // When this function is called, we have all the write locks
 // It will release the nb_items first locks
 // If you want to release all locks, nb_items should be equals to the total number of items (size / alignment)
-void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), size_t nb_items) {
+void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), local_segment_node* last_segment_locked, size_t nb_items_in_last_segment) {
     if (shared == NULL || (void*)tx == NULL) {
         return;
     }
-    for (size_t i = 0; i < nb_items; i++) {
-        shared_memory_state* ith_memory_state = &(((struct transaction*)tx)->memory_state[i]);
-        if (ith_memory_state->new_val != NULL) {
-            unsigned int current_value = atomic_load(&(((struct region*)shared)->version_locks[i]));
-            assert(is_locked(current_value));
-            unsigned int unlock_mask = ~(0u) >> 1;
-            unsigned int new_value = current_value & unlock_mask;
-            atomic_store(&(((struct region*)shared)->version_locks[i]), new_value);
+
+    size_t alignment = tm_align(shared);
+    struct transaction* trans = (struct transaction*) tx;
+    local_segment_node* curr_local_segment = trans->first_segment;
+    while (curr_local_segment != NULL) {
+        size_t size = curr_local_segment->size;
+        size_t nb_items = get_nb_items(size, alignment);
+        if (curr_local_segment == last_segment_locked) {
+            nb_items = nb_items_in_last_segment;
+        }
+        shared_segment_node* shared_segment = curr_local_segment->shared_segment;
+        for (size_t i = 0; i < nb_items; i++) {
+            void* val_written = trans->mem_state[i].new_val;
+            bool in_write_set = val_written != NULL;
+            if (in_write_set) {
+                atomic_uint* lock = &(shared_segment->version_locks[i]);
+                unsigned int current_value = atomic_load(lock);
+                assert(is_locked(current_value));
+                unsigned int unlock_mask = ~(0u) >> 1;
+                unsigned int new_value = current_value & unlock_mask;
+                atomic_store(lock, new_value);
+            }
+        }
+        if (curr_local_segment == last_segment_locked) {
+            return;
         }
     }
 }
@@ -533,24 +653,29 @@ bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t nu
 }
 
 bool lock_write_set(shared_t shared, tx_t tx) {
-    size_t size = tm_size(shared);
     size_t alignment = tm_align(shared);
-    size_t number_of_items = get_nb_items(size, alignment);
-    for (size_t i = 0; i < number_of_items; i++) {
-        void* val_written = ((struct transaction*)tx)->memory_state[i].new_val;
-        bool in_write_set = val_written != NULL;
-        if (in_write_set) {
-            atomic_uint* lock = &(((struct region*)shared)->version_locks[i]);
-            unsigned int lock_mask = 1 << (sizeof(unsigned int) * BYTE_SIZE - 1);
-            unsigned int old_value = atomic_load(lock);
-            unsigned int unlock_mask = ~(0u) >> 1;
-	        unsigned int expected_value = old_value & unlock_mask;
-            unsigned int new_value = old_value | lock_mask;
-            bool got_the_lock = atomic_compare_exchange_strong(lock, &expected_value, new_value);
-            if (!got_the_lock) {
-                // release locks got until now
-                release_write_lock(shared, tx, i);
-                return false;
+    struct transaction* trans = (struct transaction*) tx;
+    local_segment_node* curr_local_segment = trans->first_segment;
+    while (curr_local_segment != NULL) {
+        size_t size = curr_local_segment->size;
+        size_t nb_items = get_nb_items(size, alignment);
+        shared_segment_node* shared_segment = curr_local_segment->shared_segment;
+        for (size_t i = 0; i < nb_items; i++) {
+            void* val_written = trans->mem_state[i].new_val;
+            bool in_write_set = val_written != NULL;
+            if (in_write_set) {
+                atomic_uint* lock = &(shared_segment->version_locks[i]);
+                unsigned int lock_mask = 1 << (sizeof(unsigned int) * BYTE_SIZE - 1);
+                unsigned int old_value = atomic_load(lock);
+                unsigned int unlock_mask = ~(0u) >> 1;
+                unsigned int expected_value = old_value & unlock_mask;
+                unsigned int new_value = old_value | lock_mask;
+                bool got_the_lock = atomic_compare_exchange_strong(lock, &expected_value, new_value);
+                if (!got_the_lock) {
+                    // release locks got until now
+                    release_write_lock(shared, tx, i);
+                    return false;
+                }
             }
         }
     }

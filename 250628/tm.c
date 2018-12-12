@@ -200,6 +200,7 @@ shared_t tm_create(size_t size as(unused), size_t align as(unused))
 **/
 void tm_destroy(shared_t shared as(unused))
 {
+    printf("tm_destroy starts\n");
     assert(shared != NULL);
     struct region* reg = (struct region*)shared;
     shared_segment_node* curr_segment = reg->first_shared_segment;
@@ -212,6 +213,7 @@ void tm_destroy(shared_t shared as(unused))
         curr_segment = next;
     }
     free_ptr(shared);
+    printf("tm_destroy ends\n");
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
@@ -220,6 +222,7 @@ void tm_destroy(shared_t shared as(unused))
 **/
 void* tm_start(shared_t shared as(unused))
 {
+    printf("tm_start\n");
     assert(shared != NULL);
     struct region* reg = (struct region*)shared;
     return reg->first_shared_segment->start;
@@ -231,6 +234,7 @@ void* tm_start(shared_t shared as(unused))
 **/
 size_t tm_size(shared_t shared as(unused))
 {
+    printf("tm_size\n");
     assert(shared != NULL);
     size_t size = atomic_load(&(((struct region*)shared)->size));
     return size;
@@ -254,6 +258,7 @@ size_t tm_align(shared_t shared as(unused))
 **/
 tx_t tm_begin(shared_t shared, bool is_ro)
 {
+    printf("tm_align\n");
     assert(shared != NULL);
     struct region* reg = (struct region*)shared;
     unsigned int global_clock = atomic_load(&((reg->VClock)));
@@ -304,6 +309,7 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
 
 void free_transaction(tx_t tx, shared_t shared)
 {
+    printf("free_transaction: %p\n", (void*)tx);
     assert(shared != NULL);
     size_t alignment = tm_align(shared);
     struct transaction* trans = (struct transaction*)tx;
@@ -328,10 +334,12 @@ void free_transaction(tx_t tx, shared_t shared)
         }
     }
     free_ptr((void*)tx);
+    printf("free_transaction ends: %p\n", (void*)tx);
 }
 
 size_t get_start_index(shared_segment_node* shared_segment, size_t alignment, void const* mem_ptr)
 {
+    printf("get_start_index\n");
     assert(shared_segment != NULL && mem_ptr != NULL);
     void* start = shared_segment->start;
     size_t start_index = (mem_ptr - start) / alignment;
@@ -340,6 +348,7 @@ size_t get_start_index(shared_segment_node* shared_segment, size_t alignment, vo
 
 size_t get_nb_items(size_t size, size_t alignment)
 {
+    printf("get_nb_items\n");
     size_t nb_items = size / alignment;
     return nb_items;
 }

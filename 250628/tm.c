@@ -284,6 +284,7 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
         printf("tm_end %p returns false 1\n", (void*)tx);
         return true;
     }
+    printf("tm_end, %p, after first if\n", (void*)tx);
     bool validated = tm_validate(shared, tx);
     if (!validated) {
         free_transaction(tx, shared);
@@ -291,8 +292,10 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
         printf("tm_end %p returns false 2\n", (void*)tx);
         return false;
     }
+    printf("tm_end, %p, after second if\n", (void*)tx);
     // Propage writes to shared memory and release write locks
     propagate_writes(shared, tx);
+    printf("tm_end, %p, after propagate\n", (void*)tx);
     free_transaction(tx, shared);
     printf ("tm_end succeeded?: %d, tx: %p, shared: %p\n", validated, (void*)tx, (void*)shared);
     return validated;

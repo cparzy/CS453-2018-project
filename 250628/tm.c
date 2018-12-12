@@ -619,11 +619,13 @@ void release_write_lock(shared_t shared as(unused), tx_t tx as(unused), local_se
         }
         shared_segment_node* shared_segment = curr_local_segment->shared_segment;
         assert(shared_segment != NULL);
+        atomic_uint* v_locks = shared_segment->version_locks;
+        assert(v_locks != NULL);
         for (size_t i = 0; i < nb_items; i++) {
             void* val_written = curr_local_segment->mem_state[i].new_val;
             bool in_write_set = val_written != NULL;
             if (in_write_set) {
-                atomic_uint* lock = &(shared_segment->version_locks[i]);
+                atomic_uint* lock = &(v_locks[i]);
                 unsigned int current_value = atomic_load(lock);
                 assert(is_locked(current_value));
                 unsigned int unlock_mask = ~(0u) >> 1;

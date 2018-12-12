@@ -324,6 +324,7 @@ void free_transaction(tx_t tx, shared_t shared)
             assert(m_states != NULL);
             for (size_t i = 0; i < nb_items; i++) {
                 shared_memory_state* mem_state = &(m_states[i]);
+                assert(mem_state != NULL);
                 if (mem_state->new_val != NULL) {
                     free_ptr(mem_state->new_val);
                 }
@@ -408,6 +409,7 @@ local_segment_node* create_local_from_shared_segment(shared_segment_node* segmen
         local_segment->mem_state[i].read = false;
         local_segment->mem_state[i].new_val = NULL;
     }
+    local_segment->next = NULL;
     return local_segment;
 }
 

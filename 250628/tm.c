@@ -286,6 +286,7 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
     }
     printf("tm_end, %p, after first if\n", (void*)tx);
     bool validated = tm_validate(shared, tx);
+    printf("tm_end, %p, receives result from tm_validate\n", (void*)tx);
     if (!validated) {
         free_transaction(tx, shared);
         // printf ("tm_end fail, tx: %p, shared: %p\n", (void*)tx, (void*)shared);

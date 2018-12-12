@@ -579,13 +579,15 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
 
 bool tm_validate(shared_t shared as(unused), tx_t tx as(unused))
 {
+    printf("tm_validate start: %p\n", (void*)tx);
     assert(shared != NULL);
     assert((struct transaction*)tx != NULL);
     // lock the write-set
     if (!lock_write_set(shared, tx)) {
+        printf("tm_validate returns first if: %p\n", (void*)tx);
         return false;
     }
-
+    printf("tm_validate after lock_write_set, %p\n", (void*)tx);
     unsigned int former_vclock = atomic_fetch_add(&(((struct region*)shared)->VClock), 1);
     unsigned int vw = former_vclock + 1;
 
@@ -596,11 +598,12 @@ bool tm_validate(shared_t shared as(unused), tx_t tx as(unused))
     if (((struct transaction*)tx)->rv + 1 != vw) {
         // Validate read-set
         if (!validate_read_set(shared, tx, alignment)) {
+            printf("tm_validate returns second if: %p\n", (void*)tx);
             release_write_lock(shared, tx, NULL, -1, true);
             return false;
         }
     }
-
+    printf("tm_validate ends %p\n", (void*)tx);
     return true;
 }
 
@@ -710,14 +713,17 @@ bool validate_read_set(shared_t shared as(unused), tx_t tx as(unused), size_t al
 
 bool lock_write_set(shared_t shared, tx_t tx)
 {
+    printf("lock_write_set start: %p\n", (void*)tx);
     assert(shared != NULL);
     size_t alignment = tm_align(shared);
     struct transaction* trans = (struct transaction*) tx;
+    assert(trans != NULL);
     local_segment_node* curr_local_segment = trans->first_segment;
     while (curr_local_segment != NULL) {
         size_t size = curr_local_segment->size;
         size_t nb_items = get_nb_items(size, alignment);
         shared_segment_node* shared_segment = curr_local_segment->shared_segment;
+        assert(shared_segment != NULL);
         for (size_t i = 0; i < nb_items; i++) {
             void* val_written = curr_local_segment->mem_state[i].new_val;
             bool in_write_set = val_written != NULL;
@@ -730,6 +736,7 @@ bool lock_write_set(shared_t shared, tx_t tx)
                 unsigned int new_value = old_value | lock_mask;
                 bool got_the_lock = atomic_compare_exchange_strong(lock, &expected_value, new_value);
                 if (!got_the_lock) {
+                    printf("lock_write_set return false: %p\n", (void*)tx);
                     // release locks got until now
                     release_write_lock(shared, tx, curr_local_segment, i, false);
                     return false;
@@ -738,6 +745,7 @@ bool lock_write_set(shared_t shared, tx_t tx)
         }
         curr_local_segment = curr_local_segment->next;
     }
+    printf("lock_write_set returns: %p\n", (void*)tx);
     return true;
 }
 

@@ -449,20 +449,16 @@ local_segment_node* get_local_segment(void const* source, tx_t tx, shared_segmen
 **/
 bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused))
 {
+    printf("tm_read start: %p\n", source);
     assert(shared != NULL);
     assert((struct transaction*)tx != NULL);
     size_t alignment = tm_align(shared);
     bool transaction_is_ro = ((struct transaction*)tx)->is_ro;
-    if (size % alignment != 0) {
-        free_transaction(tx, shared);
-        // printf ("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
-        return false;
-    }
+    assert(size % alignment == 0);
     shared_segment_node* shared_segment = get_shared_segment(source, shared);
     assert(shared_segment != NULL);
     local_segment_node* local_segment = get_local_segment(source, tx, shared_segment, alignment);
     assert(local_segment != NULL);
-
     assert((uintptr_t)source + size <= local_segment->to);
 
     size_t start_index = get_start_index(shared_segment, alignment, source);
@@ -474,6 +470,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
 
     unsigned int* locks_before_reading = (unsigned int*) calloc(number_of_items, sizeof(unsigned int));
     if (unlikely(!locks_before_reading)) {
+        printf("tm_read return false 1\n");
         free_transaction(tx, shared);
         return false;
     }
@@ -484,6 +481,7 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
         unsigned int ith_lock = atomic_load(ith_version_lock);
         locks_before_reading[i] = ith_lock;
         if (is_locked(ith_lock) || extract_version(ith_lock) > ((struct transaction*)tx)->rv) {
+            printf("tm_read return false 2\n");
             free(locks_before_reading);
             free_transaction(tx, shared);
             return false;
@@ -517,9 +515,10 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     if (!validated) {
         free_transaction(tx, shared);
         // printf ("tm_read fail, tx: %p, source: %p\n", (void*)tx, (void*)source);
+        printf("tm_read return false 3\n");
         return false;
     }
-    // printf ("tm_read success, tx: %p, source: %p\n", (void*)tx, (void*)source);
+    printf ("tm_read success, tx: %p, source: %p\n", (void*)tx, (void*)source);
     return true;
 }
 
@@ -533,15 +532,12 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
 **/
 bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source as(unused), size_t size as(unused), void* target as(unused))
 {
+    printf("tm_write starts, target: %p\n", target);
     assert(shared != NULL);
     assert((struct transaction*)tx != NULL);
     assert(!((struct transaction*)tx)->is_ro);
     size_t alignment = tm_align(shared);
-    if (size % alignment != 0) {
-        free_transaction(tx, shared);
-        // printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
-        return false;
-    }
+    assert(size % alignment == 0);
 
     shared_segment_node* shared_segment = get_shared_segment(target, shared);
     assert(shared_segment != NULL);
@@ -564,14 +560,14 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
             memory_state->new_val = malloc(alignment);
             if (unlikely(!(memory_state->new_val))) {
                 free_transaction(tx, shared);
-                // printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
+                printf ("tm_write fail, tx: %p, target: %p\n", (void*)tx, (void*)target);
                 return false;
             }
             memcpy(memory_state->new_val, current_src_slot, alignment);
         }
         current_src_slot = alignment + (const char*)current_src_slot;
     }
-    // printf ("tm_write success, tx: %p, target: %p\n", (void*)tx, (void*)target);
+    printf ("tm_write success, tx: %p, target: %p\n", (void*)tx, (void*)target);
     return true;
 }
 

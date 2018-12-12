@@ -720,16 +720,22 @@ bool lock_write_set(shared_t shared, tx_t tx)
     struct transaction* trans = (struct transaction*) tx;
     assert(trans != NULL);
     local_segment_node* curr_local_segment = trans->first_segment;
+    printf("lock_write_set, %p, before while, size: %zu\n", (void*)tx, tm_size(shared));
     while (curr_local_segment != NULL) {
         size_t size = curr_local_segment->size;
+        printf("lock_write_set, %p, in while, size: %zu\n", (void*)tx, size);
         size_t nb_items = get_nb_items(size, alignment);
         shared_segment_node* shared_segment = curr_local_segment->shared_segment;
         assert(shared_segment != NULL);
+        shared_memory_state* m_states = curr_local_segment->mem_state;
+        assert(m_states != NULL);
+        atomic_uint* v_locks = shared_segment->version_locks;
+        assert(v_locks != NULL);
         for (size_t i = 0; i < nb_items; i++) {
-            void* val_written = curr_local_segment->mem_state[i].new_val;
+            void* val_written = m_states[i].new_val;
             bool in_write_set = val_written != NULL;
             if (in_write_set) {
-                atomic_uint* lock = &(shared_segment->version_locks[i]);
+                atomic_uint* lock = &(v_locks[i]);
                 unsigned int lock_mask = 1 << (sizeof(unsigned int) * BYTE_SIZE - 1);
                 unsigned int old_value = atomic_load(lock);
                 unsigned int unlock_mask = ~(0u) >> 1;
@@ -744,6 +750,7 @@ bool lock_write_set(shared_t shared, tx_t tx)
                 }
             }
         }
+        assert(curr_local_segment != NULL);
         curr_local_segment = curr_local_segment->next;
     }
     printf("lock_write_set returns: %p\n", (void*)tx);

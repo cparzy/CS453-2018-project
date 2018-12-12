@@ -281,14 +281,14 @@ bool tm_end(shared_t shared as(unused), tx_t tx as(unused))
     assert((void*)tx != NULL);
     if (((struct transaction*)tx)->is_ro) {
         free_transaction(tx, shared);
-        printf("tm_end returns false 1\n");
+        printf("tm_end %p returns false 1\n", (void*)tx);
         return true;
     }
     bool validated = tm_validate(shared, tx);
     if (!validated) {
         free_transaction(tx, shared);
         // printf ("tm_end fail, tx: %p, shared: %p\n", (void*)tx, (void*)shared);
-        printf("tm_end returns false 2\n");
+        printf("tm_end %p returns false 2\n", (void*)tx);
         return false;
     }
     // Propage writes to shared memory and release write locks

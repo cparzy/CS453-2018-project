@@ -473,7 +473,8 @@ bool tm_read(shared_t shared as(unused), tx_t tx as(unused), void const* source 
     size_t alignment = tm_align(shared);
     bool transaction_is_ro = ((struct transaction*)tx)->is_ro;
     assert(size % alignment == 0);
-    shared_segment_node* shared_segment = get_shared_segment(source, shared);
+    // shared_segment_node* shared_segment = get_shared_segment(source, shared);
+    shared_segment_node* shared_segment = ((struct region*)shared)->first_shared_segment;
     assert(shared_segment != NULL);
     local_segment_node* local_segment = get_local_segment(source, tx, shared_segment, alignment);
     assert(local_segment != NULL);
@@ -557,7 +558,8 @@ bool tm_write(shared_t shared as(unused), tx_t tx as(unused), void const* source
     size_t alignment = tm_align(shared);
     assert(size % alignment == 0);
 
-    shared_segment_node* shared_segment = get_shared_segment(target, shared);
+    // shared_segment_node* shared_segment = get_shared_segment(target, shared);
+    shared_segment_node* shared_segment = ((struct region*)shared)->first_shared_segment;
     assert(shared_segment != NULL);
     local_segment_node* local_segment = get_local_segment(target, tx, shared_segment, alignment);
     assert(local_segment != NULL);
